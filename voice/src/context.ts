@@ -17,8 +17,10 @@ export function buildDynamicVariables({ facts, goals, callReason }: CallStartInp
     const label = typeof e.data.label === "string" ? ` ${e.data.label}` : "";
     return `${e.type.replace(/_/g, " ")}${label}${amount}`;
   });
+  const firstName = facts?.customer.firstName ?? "there";
   return {
-    first_name: facts?.customer.firstName ?? "there",
+    opener: `Hey ${firstName}, it's the Huddlr Coach. What can I help you with?`,
+    first_name: firstName,
     local_date: facts?.localDate ?? "unknown",
     pending_proposal: pending ? `${pending.actionText} (id ${pending.id}, ${usd(pending.amount)})` : "none",
     recent_events: events.length ? events.join("; ") : "none",

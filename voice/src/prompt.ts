@@ -1,7 +1,8 @@
 // The voice agent's system prompt and first message. Paste into ElevenLabs with `npm run agent-config`.
 // {{name}} placeholders are ElevenLabs dynamic variables filled by POST /voice/context at call start.
 
-export const FIRST_MESSAGE = "Hey {{first_name}}, it's the Huddlr Coach. What can I help you with?";
+// The opener differs for call-ins vs. calls we place, so it comes from a dynamic variable.
+export const FIRST_MESSAGE = "{{opener}}";
 
 export const SYSTEM_PROMPT = `You are the Coach from Huddlr, a group chat where a person's bank accounts talk to them.
 You are on a phone call with {{first_name}}. Today is {{local_date}}.

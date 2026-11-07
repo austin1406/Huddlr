@@ -52,6 +52,26 @@ export interface ParsedCall {
   /** Every number that appeared in a tool result during the call. */
   groundedNumbers: Set<string>;
   transcript: { speaker: "user" | "coach"; text: string }[];
+  /** Set for outbound calls placed from a call_requests row (passed in as a dynamic variable). */
+  callRequestId: number | null;
+  /** False when the user never spoke (unanswered or voicemail). */
+  answered: boolean;
+}
+
+/** ElevenLabs sends this when an outbound call never connects (busy, no answer). */
+export interface CallFailure {
+  providerCallId: string | null;
+  callRequestId: number | null;
+  outcome: "no_answer" | "busy" | "failed";
+}
+
+export function parseCallFailure(payload: PostCallPayload & { data?: { failure_reason?: string } }): CallFailure | null {
+  if (payload.type !== "call_initiation_failure") return null;
+  const d = payload.data ?? {};
+  const reason = (d.failure_reason ?? "").toLowerCase();
+  const outcome = reason.includes("busy") ? "busy" : reason.includes("answer") ? "no_answer" : "failed";
+  const id = Number(d.conversation_initiation_client_data?.dynamic_variables?.call_request_id);
+  return { providerCallId: d.conversation_id ?? null, callRequestId: Number.isFinite(id) && id > 0 ? id : null, outcome };
 }
 
 const NUMBER_RE = /\d[\d,]*(?:\.\d+)?/g;
@@ -103,7 +123,10 @@ export function parsePostCall(payload: PostCallPayload, fallbackPhone: string): 
   }
 
   const meta = d.metadata ?? {};
+  const reqId = Number(dyn.call_request_id);
   return {
+    callRequestId: Number.isFinite(reqId) && reqId > 0 ? reqId : null,
+    answered: transcript.some((t) => t.speaker === "user"),
     providerCallId: d.conversation_id,
     userPhone: meta.phone_call?.external_number || fallbackPhone,
     direction: meta.phone_call?.direction === "outbound" ? "outbound" : "inbound",

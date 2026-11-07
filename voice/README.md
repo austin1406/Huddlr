@@ -28,6 +28,18 @@ npm run agent-config   # prints the ElevenLabs prompt, tools, and webhook URLs (
 | `POST /voice/context` | ElevenLabs conversation-initiation webhook | Returns dynamic variables (first name, date, pending proposal, recent events, goals) from P1's `/facts` and P2's `memory_facts`. Checks `x-huddlr-secret`. |
 | `POST /voice/post-call` | ElevenLabs post-call webhook | Verifies the `ElevenLabs-Signature` HMAC, saves to `calls` and `memory_messages`, writes a recap row to `outbox` (idempotent on the conversation id). |
 
+## Outbound calls (emergency, monthly recap)
+
+When `DATABASE_URL` is set, the service polls P2's `call_requests` every 3 seconds and places one call at a time through ElevenLabs on the Photon number.
+
+- **Emergency** calls ignore quiet hours. **Monthly recap** calls wait for daytime (or `demo_mode`).
+- Only numbers in `VOICE_OPTED_IN_NUMBERS` (default: `DEMO_USER_PHONE`) are called. Others are marked `cancelled`.
+- The call's opener and reason come from the row's `shortfall`, so every number is from code.
+- The row's id rides along as a dynamic variable, so the post-call webhook can link `calls.call_request_id` and set the status.
+- **Text fallback** (outbox, priority 2 for emergencies) when the dial fails, ElevenLabs reports busy or no answer, nobody speaks on the call, or no webhook arrives within 15 minutes.
+- Test it: insert a `call_requests` row by hand with `type = 'emergency'` and a `shortfall`, and watch the logs.
+- `VOICE_OUTBOUND=off` stops the poller.
+
 The agent's tools call P1's `/tools/*` directly with the `x-huddlr-secret` header (see `src/tools.ts`).
 
 ## Safety
