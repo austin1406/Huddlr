@@ -77,7 +77,11 @@ export function makeProposalService(db: Queryable, now: () => Date | Promise<Dat
   const transition = async (id: number, sql: string, params: unknown[], t: Date): Promise<ProposalResult> => {
     if (!Number.isInteger(id) || id <= 0) return fail("not_found", null);
     const r = await db.query(sql, params);
-    if (r.rows[0]) return ok(toRow(r.rows[0]));
+    if (r.rows[0]) {
+      // The user answered (or the money moved): an emergency call that hasn't started yet is no longer needed.
+      await db.query("UPDATE call_requests SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE proposal_id = $1 AND status = 'pending'", [id]);
+      return ok(toRow(r.rows[0]));
+    }
     const row = await get(id);
     const reason = whyNot(row, t);
     if (reason === "expired" && row?.status === "pending") {

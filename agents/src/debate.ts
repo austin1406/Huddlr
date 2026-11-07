@@ -11,6 +11,7 @@ import { config, speak } from "./character";
 import type { Queryable } from "./db";
 import type { Finance } from "./finance";
 import { buildDigest, decide, type Decision } from "./moderator";
+import { scheduleProposalFollowUps } from "./followups";
 import { queueOutbox } from "./outbox";
 
 export interface DebateDeps {
@@ -111,6 +112,8 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
         if (plan && ask) {
           const created = await proposals.create({ userPhone, plan, ...ask, sourceEventId: event.id });
           proposalId = created.proposal ? Number(created.proposal.id) : null;
+          if (proposalId != null)
+            await scheduleProposalFollowUps(db, { userPhone, proposalId, now, emergency: facts.shortfall?.within48Hours === true });
         }
         const line = await speak("coach", facts, situation("coach", event), {
           event, plan, ask: ask?.actionText ?? null, model: deps.model, deadline: started + config.debate.plan_target_ms,
@@ -140,18 +143,27 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
   return result;
 }
 
-/** Reads new events from finance after the stored cursor and runs each one. Returns what happened. */
+/** Reads new events from finance after the stored cursor and runs each one. The first call only records where "now" is. */
 export async function pollEvents(deps: DebateDeps): Promise<DebateResult[]> {
   const cur = await deps.db.query<{ value: string }>("SELECT value FROM agent_state WHERE key = 'events_cursor'");
-  const events = await deps.finance.events(cur.rows[0]?.value);
+  const setCursor = (id: string) =>
+    deps.db.query(
+      `INSERT INTO agent_state (key, value) VALUES ('events_cursor', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+      [id],
+    );
+  if (!cur.rows[0]) {
+    // First start or right after a reset: skip the backlog silently so the chat isn't flooded with old news.
+    let last: string | undefined;
+    for (let page = await deps.finance.events(); page.length; page = await deps.finance.events(last)) last = page.at(-1)!.id;
+    await setCursor(last ?? "");
+    return [];
+  }
+  const events = await deps.finance.events(cur.rows[0].value || undefined);
   const results: DebateResult[] = [];
   for (const event of events) {
     results.push(await runEvent(deps, event));
-    await deps.db.query(
-      `INSERT INTO agent_state (key, value) VALUES ('events_cursor', $1)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
-      [event.id],
-    );
+    await setCursor(event.id);
   }
   return results;
 }

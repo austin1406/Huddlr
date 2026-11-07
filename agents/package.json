@@ -8,7 +8,8 @@
     "card": "tsx --env-file-if-exists=../.env src/card-demo.ts",
     "harness": "tsx --env-file-if-exists=../.env src/harness.ts",
     "start": "tsx src/server.ts",
-    "dev": "tsx watch src/server.ts"
+    "dev": "tsx watch src/server.ts",
+    "local": "tsx src/server.ts --local"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

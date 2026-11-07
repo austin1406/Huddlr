@@ -60,3 +60,32 @@ Start it: `DATABASE_URL=... npm start`. It creates its tables, serves the API, a
   preferences ("don't text me after 9pm") go to `memory_facts` and get a short ack; questions get one grounded answer
   from the right character.
 - `test/debate.test.ts` runs against P1's real finance stub app in-process, so a contract mismatch fails CI.
+
+## Try it on your laptop (no database needed)
+
+```bash
+cd finance && FINANCE_SCENARIO=shortfall npm start          # P1's stub on :4000
+cd agents && npm run local                                  # agents on :5055 (macOS AirPlay owns 5000), Postgres in agents/.data
+curl -XPOST localhost:5055/agents/dev/demo -d '{"on":true}'   # bypass quiet hours
+curl -XPOST localhost:4000/admin/events -H "x-huddlr-secret: $HUDDLR_SECRET" -H 'content-type: application/json' \
+  -d '{"id":"evt_forecast_problem_1","type":"forecast_problem","occurredAt":"2026-12-02T15:00:00.000Z","severity":"high","accountId":"checking","data":{}}'
+curl localhost:5055/agents/dev/chat                          # the conversation as the phone would show it
+curl -XPOST localhost:5055/agents/dev/jump -d '{"hours":1.5}' # fast-forward: reminder, then escalation
+curl -XPOST localhost:5055/agents/dev/text -d '{"text":"yes"}'
+```
+
+On the first start (or after `/agents/reset`) the agents skip the existing event backlog and react only to new events.
+
+## Follow-ups and escalation (H14, H17)
+
+- Every proposal gets a reminder after 60 simulated minutes if still unanswered.
+- An emergency (shortfall within 48 h) also gets an escalation check at 90 minutes: if the plan is still unanswered and
+  the shortfall is still in the facts, a `call_requests` row (type `emergency`, shortfall in cents, a one-line
+  `script_hint`) is written for P4's voice agent, plus a priority-2 text saying a call is coming.
+- A YES, NO, or completed transfer cancels any call request that P4 hasn't started (`status = 'cancelled'`).
+- When P1's watcher calls `/complete`, the Coach confirms once: "Saw it: you moved $143.00 from Savings to Checking."
+
+## Deploy (on the VM)
+
+`/opt/huddlr/agents/deploy/deploy.sh` — pulls main, installs, (re)starts `agents` under pm2, checks `/agents/health`.
+Needs `DATABASE_URL`, `HUDDLR_SECRET`, `DEMO_USER_PHONE`, `GEMINI_API_KEY` in `/opt/huddlr/.env`.
