@@ -32,7 +32,7 @@ export function extractMemory(text: string): Learned[] {
       kind: "goal",
       key: `goal:${slug(label)}`,
       value: { label, ...(target ? { target } : {}), ...(by ? { by } : {}) },
-      ack: `Noted: you're saving for ${label}${target ? ` (${amountText})` : ""}${by ? ` by ${by}` : ""}. The crew will keep it in mind.`,
+      ack: `Noted your ${label} goal${target ? `: ${amountText}` : ""}${by ? ` by ${by}` : ""}. The crew will keep it in mind.`,
     });
   }
 

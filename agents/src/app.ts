@@ -12,6 +12,7 @@ import {
   type ProposalResult,
 } from "../../contracts/src";
 import type { Queryable } from "./db";
+import { queueOutbox } from "./outbox";
 import type { makeProposalService } from "./proposals";
 
 type Service = ReturnType<typeof makeProposalService>;
@@ -36,10 +37,11 @@ async function body<T>(c: Context, schema: Parsable<T>): Promise<{ data: T } | {
 const reply = (c: Context, r: ProposalResult) => c.json(r, r.ok ? 200 : r.reason === "not_found" ? 404 : 409);
 
 /** Tables P2 owns, cleared by reset-agents. sim_state (P1) and calls/call_requests rows from P4 are P2 tables too. */
-const P2_TABLES = ["follow_ups", "agent_event_reactions", "memory_messages", "memory_facts", "calls", "call_requests", "outbox", "inbound_messages", "proposals"];
+const P2_TABLES = ["agent_state", "follow_ups", "agent_event_reactions", "memory_messages", "memory_facts", "calls", "call_requests", "outbox", "inbound_messages", "proposals"];
 
-export function createApp(opts: { db: Queryable; proposals: Service; secret: string; demoUserPhone: string }) {
+export function createApp(opts: { db: Queryable; proposals: Service; secret: string; demoUserPhone: string; now?: () => Promise<Date> | Date }) {
   const { db, proposals, secret, demoUserPhone } = opts;
+  const now = async () => (opts.now ? await opts.now() : new Date());
   const app = new Hono().basePath(AGENTS_BASE_PATH);
   const p = AGENT_ENDPOINTS;
   const idOf = (c: Context) => Number(c.req.param("id"));
@@ -81,7 +83,17 @@ export function createApp(opts: { db: Queryable; proposals: Service; secret: str
 
   app.post(p.complete.path, async (c) => {
     const b = await body(c, CompleteRequest);
-    return "response" in b ? b.response : reply(c, await proposals.markCompleted(idOf(c), b.data.txnId));
+    if ("response" in b) return b.response;
+    const r = await proposals.markCompleted(idOf(c), b.data.txnId);
+    // The transfer really happened: the Coach closes the loop once (idempotent on the proposal id).
+    const row = r.ok ? await proposals.get(idOf(c)) : null;
+    if (row)
+      await queueOutbox(db, {
+        idempotency_key: `proposal:${row.id}:completed`, user_phone: row.user_phone, speaker: "coach",
+        text: `Saw it: ${row.action_text.replace(/^Move/, "you moved")}. Nice, you're covered.`,
+        thread_key: `proposal:${row.id}`, proposal_id: row.id, priority: 1, created_sim_at: (await now()).toISOString(),
+      });
+    return reply(c, r);
   });
 
   app.post(p.reset.path, async (c) => {

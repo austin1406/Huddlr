@@ -87,11 +87,15 @@ test("never reacts to the same event id twice", async () => {
   assert.equal((await outbox()).length, n);
 });
 
-test("pollEvents reads P1's /events once, keeps a cursor, and a second poll does nothing new", async () => {
+test("pollEvents: first start skips the backlog, then reacts to each new event exactly once", async () => {
   const { deps, outbox, state } = await setup("normal", { demoMode: true });
-  const first = await pollEvents(deps);
-  assert.equal(first.length, state.listEvents().length);
+  assert.equal((await pollEvents(deps)).length, 0, "old events are not replayed");
+  assert.equal((await outbox()).length, 0);
+  state.addEvent(event({ id: "evt_big_purchase_new", type: "big_purchase", severity: "medium", accountId: "card", data: { merchant: "Target", amount: 142.37 } }));
+  const r = await pollEvents(deps);
+  assert.deepEqual(r.map((x) => [x.eventId, x.decision]), [["evt_big_purchase_new", "react"]]);
   const n = (await outbox()).length;
+  assert.ok(n > 0);
   assert.equal((await pollEvents(deps)).length, 0);
   assert.equal((await outbox()).length, n);
 });
