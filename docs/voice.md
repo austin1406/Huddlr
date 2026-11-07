@@ -6,8 +6,8 @@ Owner: P4 (Rishi). Setup notes, findings, and the runbook for phone calls. Code 
 
 | Item | Status | Notes |
 |---|---|---|
-| SMS number purchased | not started | |
-| Default SIP voice profile | not started | |
+| SMS number purchased | done | +1 (828) 647-2114, on the Default voice profile. Shared iMessage lines can't take calls, so voice needs this number. |
+| Default SIP voice profile | in progress | Profile exists; destination (ElevenLabs inbound SIP address) not set yet |
 | ElevenLabs agent created | not started | Model: TBD |
 | Number imported into ElevenLabs (TLS, per Photon cookbook) | not started | |
 | Inbound test call, audio both ways | not started | |
@@ -17,7 +17,19 @@ Owner: P4 (Rishi). Setup notes, findings, and the runbook for phone calls. Code 
 
 **Gate 0 (H3):** an inbound and an outbound call both work. No number by H3 means voice is cut.
 
-## Setup, in order
+## Fast path: setup script
+
+Fill `ELEVENLABS_API_KEY`, `PUBLIC_BASE_URL`, `HUDDLR_SECRET`, `VOICE_PHONE_NUMBER`, `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET` in `.env`, then:
+
+```bash
+cd voice
+npm run setup:elevenlabs -- --dry-run   # check, sends nothing
+npm run setup:elevenlabs                # creates secret, 6 tools, post-call webhook, agent, SIP number
+```
+
+It writes `ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID`, and `ELEVENLABS_WEBHOOK_SECRET` into `.env` without printing them. After a prompt change: `npm run setup:elevenlabs -- --update`. Then set the Photon Default profile's destination (step 5 below) and deploy.
+
+## Setup by hand, in order
 
 1. **Photon:** buy the SMS number, add the default SIP voice profile.
 2. **ElevenLabs:** create an agent. Run `cd voice && npm run agent-config` and copy in:

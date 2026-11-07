@@ -7,6 +7,7 @@
     "start": "tsx src/server.ts",
     "agent-config": "tsx src/printAgentConfig.ts",
     "latency": "tsx src/latency.ts",
+    "setup:elevenlabs": "tsx src/setupElevenLabs.ts",
     "test": "tsc --noEmit && tsx --test test/*.test.ts"
   },
   "dependencies": {
