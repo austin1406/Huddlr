@@ -1,0 +1,37 @@
+{
+  "customer": { "first_name": "Maya", "last_name": "Demo" },
+  "accounts": {
+    "checking": { "balance": 1240 },
+    "savings": { "balance": 2100 },
+    "credit_card": { "balance": 860 }
+  },
+  "paycheck": { "amount": 1850, "every_days": 14, "last_date": "2026-11-06" },
+  "bills": [
+    { "payee": "Rent", "amount": 1150, "day_of_month": 1 },
+    { "payee": "Car Loan", "amount": 320, "day_of_month": 12 },
+    { "payee": "Phone", "amount": 65, "day_of_month": 18 },
+    { "payee": "Electric", "amount": 90, "day_of_month": 22 },
+    { "payee": "Streaming", "amount": 16, "day_of_month": 27 }
+  ],
+  "daily_spend": { "min": 8, "max": 45 },
+  "merchants": [
+    { "name": "H-E-B", "category": "groceries" },
+    { "name": "Kroger", "category": "groceries" },
+    { "name": "Shell", "category": "gas" },
+    { "name": "QuikTrip", "category": "gas" },
+    { "name": "Starbucks", "category": "coffee" },
+    { "name": "Chipotle", "category": "dining" },
+    { "name": "Whataburger", "category": "dining" },
+    { "name": "Target", "category": "shopping" },
+    { "name": "Amazon", "category": "shopping" },
+    { "name": "CVS", "category": "pharmacy" },
+    { "name": "AMC Theatres", "category": "entertainment" },
+    { "name": "Uber", "category": "transport" }
+  ],
+  "p2p": [
+    { "payee": "Roommate", "amount": 45, "days_ago": 40 },
+    { "payee": "Roommate", "amount": 30, "days_ago": 12 },
+    { "payee": "Friend", "amount": 25, "days_ago": 5 }
+  ],
+  "history_days": 60
+}

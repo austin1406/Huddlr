@@ -1,0 +1,19 @@
+{
+  "name": "huddlr-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "tsx seed/seed.ts",
+    "seed:dry": "tsx seed/seed.ts --dry-run",
+    "seed:reset": "tsx seed/seed.ts --reset",
+    "test": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
