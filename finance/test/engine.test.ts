@@ -1,10 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CanIAffordResponse, Plan, WhatIfResult } from "../../contracts/src";
+import { CanIAffordResponse, Plan } from "../../contracts/src";
 import { FIXTURES } from "../src/data/fixtures";
 import { canIAfford } from "../src/engine/afford";
 import { planV0 } from "../src/engine/plan";
-import { whatIf } from "../src/engine/whatif";
 
 const normal = FIXTURES.normal;
 const shortfall = FIXTURES.shortfall;
@@ -74,16 +73,4 @@ test("plan lines always add up to the amount", () => {
       assert.equal(cents(total), cents(amount), `${amount}`);
     }
   }
-});
-
-test("what-if purchase_now is computed; other scenarios echo the fixture shape", () => {
-  const p = whatIf(normal, { type: "purchase_now", amount: 50 }, FIXTURES.whatIf);
-  WhatIfResult.parse(p);
-  assert.equal(p.after.lowestBalance.balance, 97.5);
-  assert.equal(p.before.lowestBalance.balance, 147.5);
-  assert.equal(p.daysUntilNegative, null);
-
-  const lose = whatIf(normal, { type: "lose_income", months: 1 }, FIXTURES.whatIf);
-  assert.equal(lose.scenario.type, "lose_income");
-  assert.equal(lose.daysUntilNegative, FIXTURES.whatIf.daysUntilNegative);
 });

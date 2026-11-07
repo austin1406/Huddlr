@@ -12,14 +12,15 @@ import {
   WhatIfResult,
 } from "../../contracts/src";
 import { createApp } from "../src/app";
-import { StubState } from "../src/state";
+import { StubBackend } from "../src/stub/backend";
+import { StubState } from "../src/stub/state";
 
 const SECRET = "test-secret";
 const auth = { [TOOL_AUTH_HEADER]: SECRET };
 const json = { ...auth, "content-type": "application/json" };
 
 function setup(scenario: "normal" | "shortfall" = "normal") {
-  return createApp({ secret: SECRET, state: new StubState(scenario) });
+  return createApp({ secret: SECRET, backend: new StubBackend(new StubState(scenario)) });
 }
 const post = (app: ReturnType<typeof setup>, path: string, body: unknown = {}) =>
   app.request(path, { method: "POST", headers: json, body: JSON.stringify(body) });
@@ -35,7 +36,7 @@ test("/health needs no secret; everything else does", async () => {
 });
 
 test("with no secret configured (local dev) requests are allowed", async () => {
-  const app = createApp({ secret: "", state: new StubState() });
+  const app = createApp({ secret: "", backend: new StubBackend() });
   assert.equal((await app.request("/facts")).status, 200);
 });
 
@@ -120,4 +121,13 @@ test("proposal flow: pending, accept, accept again, then nothing pending", async
   await post(app, "/admin/reset");
   const back = GetPendingProposalResponse.parse(await (await post(app, ENDPOINTS.tools.get_pending_proposal.path)).json());
   assert.equal(back.proposal?.id, "prop_demo_1");
+});
+
+test("engine-only admin routes answer 501 in stub mode", async () => {
+  const app = setup();
+  for (const path of ["/admin/purchase", "/admin/transfer", "/admin/paycheck", "/admin/bill", "/admin/sim/jump-days", "/admin/sim/demo-mode"]) {
+    const res = await post(app, path, { amount: 5, on: true, days: 1 });
+    assert.equal(res.status, 501, path);
+  }
+  assert.equal((await app.request("/admin/state", { headers: auth })).status, 501);
 });

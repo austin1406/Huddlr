@@ -1,6 +1,7 @@
 import type { CanIAffordResponse, FactsSnapshot } from "../../../contracts/src";
+import { r2 } from "./calendar";
 
-export const r2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+export { r2 };
 
 /**
  * A purchase today lowers every balance in the forecast by the same amount, so the lowest point
