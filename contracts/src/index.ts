@@ -6,3 +6,4 @@ export * from "./scenarios";
 export * from "./tools";
 export * from "./time";
 export * from "./persona";
+export * from "./agents";

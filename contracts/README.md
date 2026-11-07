@@ -25,15 +25,10 @@ Run `npm install` inside `contracts/` once (it needs `zod`). `npm test` typechec
 | `src/persona.ts` and `persona.json` | The demo customer (Maya) used by the seed script and the persona data source | P1 |
 | `thresholds.json` | Cushion, big-purchase size, indicator cutoffs | P1 |
 | `fixtures/` | Facts (normal and rent-week shortfall), events, plan, what-if, `sim_state` | P1 |
-
-## Still to write (P2, hour 1)
-
-- Outbox row (with optional `attachment: indicator_card` and `reply_to`) and inbound message schemas
-- `ProposalService` interface: get pending, accept, decline, expire, mark completed
-- `call_requests` schema with `type`: `emergency` or `monthly_recap`
-- Memory tables: messages, facts, calls, follow_ups
-
-Add them as new files under `src/` and export them from `src/index.ts`.
+| `src/agents.ts` | Outbox and inbound rows, proposals, `ProposalService` and its HTTP API, `call_requests`, memory rows, reply rules | P2 |
+| `p2_agents.sql` | Postgres tables for the above (snake_case, integer cents, numeric ids). Safe to re-run. | P2 |
+| `cast.json` | The 6 characters: id, name, emoji, account, personality. P3 formats messages as `<emoji> <name>: <text>`. | P2 |
+| `agents-config.json` | Character model, moderator caps, debate budgets, escalation cutoff, safety rules | P2 |
 
 ## The clock rule
 
