@@ -57,6 +57,19 @@ One database row, `sim_state {offset_seconds, demo_mode}`, and one shared `now()
 - **Units:** dollars as plain numbers rounded to cents; dates are local calendar days (`YYYY-MM-DD`); timestamps are ISO instants. Card and loan balances are the amount owed.
 - **Event IDs:** derive them from the source record with `makeEventId`, never from the time.
 
+## Boundaries with the agents service (P2)
+
+Both sides agree on these so nothing is guessed at integration time:
+
+- **Auth:** every service-to-service call sends `x-huddlr-secret` with the value of `HUDDLR_SECRET`.
+- **Account ids** everywhere are `checking`, `savings`, `card`, `car_loan`, `ira`. Use these in `from_account` and `to_account`, not `credit_card` or `ira_simulated` (those are account *kinds* or labels).
+- **Money:** finance contracts use dollars (numbers). P2 stores integer cents. Convert at P2's boundary: `amount_cents = Math.round(amount * 100)`.
+- **Plan:** P2 stores P1's `Plan` object verbatim (camelCase: `lines`, `reasonCode`, `reasonNumbers`).
+- **Shortfall to `call_requests.shortfall`:** `{ amount_cents: round(shortfall.amount*100), date: shortfall.firstNegativeDate, account: shortfall.accountId }`.
+- **Proposal ids:** strings in the finance tools and facts, numbers in the agents database. The finance wrapper converts.
+- **One demo user:** the finance tools take no phone number; `DEMO_USER_PHONE` identifies the customer.
+- **Quiet hours:** `isQuietHours` uses whole hours (default 22:00 to 08:00). If P2 wants 21:30, either use 22:00 or read the hour and minute from `localDate`/`localHour` yourself.
+
 ## Fixtures
 
 The fixtures are the expected output of the engine for the demo persona, so P1's forecast and indicator tests can compare against them, and P2, P3, and P4 can build against real shapes before the engine exists.

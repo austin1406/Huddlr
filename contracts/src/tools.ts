@@ -5,8 +5,11 @@ import { FactsSnapshot, ProposalStatus, ProposalSummary } from "./facts";
 import { Plan } from "./plan";
 import { Scenario, WhatIfResult } from "./scenarios";
 
-/** Every tool call must send this header with the shared secret (VOICE_TOOL_SECRET). */
-export const TOOL_AUTH_HEADER = "x-tool-secret";
+/**
+ * Every service-to-service call (finance tools, agents' proposal endpoints) sends this header
+ * with the shared secret from HUDDLR_SECRET. The voice agent's tools send it too.
+ */
+export const TOOL_AUTH_HEADER = "x-huddlr-secret";
 
 export const ToolName = z.enum([
   "get_snapshot",
@@ -79,6 +82,10 @@ export type GetPendingProposalResponse = z.infer<typeof GetPendingProposalRespon
  * accept_proposal is a thin wrapper: the finance service forwards to the agents service's
  * ProposalService, which owns every rule (duplicates, expiry, "unclear means no").
  * Voice must only call it after a clearly spoken yes.
+ *
+ * Proposal ids are strings here. The agents service stores numeric ids, so the wrapper converts
+ * (String(id) out, Number(id) in). The hackathon has one demo customer, so the finance service
+ * resolves the user from DEMO_USER_PHONE; the tools take no phone number.
  */
 export const AcceptProposalRequest = z.object({
   proposalId: z.string(),
@@ -88,6 +95,8 @@ export type AcceptProposalRequest = z.infer<typeof AcceptProposalRequest>;
 export const AcceptProposalResponse = z.object({
   ok: z.boolean(),
   status: ProposalStatus,
+  /** Why it did not change anything, so the voice agent can say the right thing. */
+  reason: z.enum(["not_found", "not_pending", "expired", "already_accepted", "already_completed"]).nullable().optional(),
   message: z.string().optional(),
 });
 export type AcceptProposalResponse = z.infer<typeof AcceptProposalResponse>;
