@@ -5,7 +5,10 @@ import { serve } from "@hono/node-server";
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app";
+import { handleChat } from "./chat";
 import { migrate, pool, readClock } from "./db";
+import { maybeSendDigest, pollEvents, type DebateDeps } from "./debate";
+import { financeClient } from "./finance";
 import { makeProposalService } from "./proposals";
 import { handleInbound } from "./replies";
 
@@ -18,6 +21,9 @@ const env = {
   demoUserPhone: process.env.DEMO_USER_PHONE || "",
   /** Real-clock polling interval (delivery mechanics, not calendar logic). */
   pollMs: Number(process.env.AGENTS_POLL_MS || 1000),
+  /** P1's finance service. On the VM it is localhost:4000; FINANCE_URL overrides. */
+  financeUrl: process.env.FINANCE_URL || `http://localhost:${process.env.FINANCE_PORT || 4000}`,
+  eventsPollMs: Number(process.env.AGENTS_EVENTS_POLL_MS || 5000),
 };
 
 if (!env.databaseUrl) {
@@ -30,6 +36,8 @@ const db = pool(env.databaseUrl);
 await migrate(db);
 const now = async () => (await readClock(db)).now;
 const proposals = makeProposalService(db, now);
+const finance = financeClient(env.financeUrl, env.secret);
+const debate: DebateDeps = { db, finance, proposals, userPhone: env.demoUserPhone, clock: () => readClock(db) };
 
 serve({ fetch: createApp({ db, proposals, secret: env.secret, demoUserPhone: env.demoUserPhone }).fetch, port: env.port }, (info) =>
   console.log(`[agents] listening on :${info.port}/agents`),
@@ -45,8 +53,12 @@ setInterval(async () => {
       "SELECT id, user_phone, text FROM inbound_messages WHERE processed_at IS NULL ORDER BY id LIMIT 20",
     );
     for (const row of r.rows) {
-      const result = await handleInbound(db, proposals, { ...row, id: Number(row.id) }, await now());
-      if (result.kind !== "duplicate") console.log(`[agents] inbound ${row.id}: ${result.kind}`);
+      const at = await now();
+      const result = await handleInbound(db, proposals, { ...row, id: Number(row.id) }, at);
+      if (result.kind === "chat") {
+        const chat = await handleChat({ db, facts: () => finance.facts(), userPhone: row.user_phone }, { id: Number(row.id), text: row.text }, at);
+        console.log(`[agents] inbound ${row.id}: chat -> ${chat.responder}${chat.learned ? ` (saved ${chat.learned} to memory)` : ""}`);
+      } else if (result.kind !== "duplicate") console.log(`[agents] inbound ${row.id}: ${result.kind}`);
     }
     await proposals.expireStale();
   } catch (e) {
@@ -55,3 +67,21 @@ setInterval(async () => {
     busy = false;
   }
 }, env.pollMs).unref?.();
+
+// Finance events -> debates. Sequential so two debates never interleave in the chat.
+if (!env.demoUserPhone) console.warn("[agents] DEMO_USER_PHONE is empty: event reactions are off.");
+let eventsBusy = false;
+setInterval(async () => {
+  if (eventsBusy || !env.demoUserPhone) return;
+  eventsBusy = true;
+  try {
+    for (const r of await pollEvents(debate))
+      console.log(`[agents] event ${r.eventId}: ${r.decision} (${r.reason})${r.firstMessageMs != null ? ` first=${r.firstMessageMs}ms plan=${r.planMs}ms` : ""}`);
+    const facts = await finance.facts();
+    if (await maybeSendDigest(debate, facts.timezone)) console.log("[agents] queued the evening digest");
+  } catch (e) {
+    console.error("[agents] events poll failed:", (e as Error).message);
+  } finally {
+    eventsBusy = false;
+  }
+}, env.eventsPollMs);
