@@ -14,7 +14,11 @@
     "coach_always_speaks_when_plan": true,
     "daily_cap_proactive": 6,
     "daily_cap_proactive_demo_mode": 40,
-    "quiet_hours": { "start": "21:30", "end": "08:00", "timezone": "America/Chicago" },
+    "quiet_hours": {
+      "start_hour": 22,
+      "end_hour": 8,
+      "note": "Uses P1's isQuietHours(now(), facts.timezone, {demoMode, emergency}). Timezone comes from the facts snapshot."
+    },
     "digest_time": "19:00",
     "clock": "Quiet hours, daily cap, and digest time are evaluated on the shared now() (simulated time).",
     "demo_mode": "Bypasses quiet hours and uses daily_cap_proactive_demo_mode. Emergencies (priority 2) ignore both in every mode."
@@ -35,14 +39,49 @@
     "call_type": "emergency"
   },
   "reply_classifier": {
-    "yes": ["yes", "y", "yep", "yeah", "do it", "ok", "okay", "sure", "approve", "go ahead"],
-    "no": ["no", "n", "nope", "nah", "not now", "decline", "stop", "skip"],
+    "yes": [
+      "yes",
+      "y",
+      "yep",
+      "yeah",
+      "do it",
+      "ok",
+      "okay",
+      "sure",
+      "approve",
+      "go ahead"
+    ],
+    "no": [
+      "no",
+      "n",
+      "nope",
+      "nah",
+      "not now",
+      "decline",
+      "stop",
+      "skip"
+    ],
     "rule": "Only an unambiguous yes accepts. Anything mixed or unclear counts as not approved and gets a clarifying question."
   },
   "number_checker": {
     "rule": "Every number in a character message must equal a number in the facts snapshot or the plan (after normalization). Otherwise retry once if time allows, else send the template.",
-    "allowed_formats": ["$1,234.56", "$1234", "$1.2k", "1,234", "12%", "12.5%", "3 days", "Nov 14", "11/14"],
-    "always_allowed": ["0", "1", "2", "3"]
+    "allowed_formats": [
+      "$1,234.56",
+      "$1234",
+      "$1.2k",
+      "1,234",
+      "12%",
+      "12.5%",
+      "3 days",
+      "Nov 14",
+      "11/14"
+    ],
+    "always_allowed": [
+      "0",
+      "1",
+      "2",
+      "3"
+    ]
   },
   "safety_rules": [
     "Agents never move money. They create a proposal; the user moves the money in their own bank.",

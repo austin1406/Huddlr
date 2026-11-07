@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-11-07T16:00:00.000Z",
+  "amount": 600.0,
+  "shortfallCovered": 0.0,
+  "unallocated": 0.0,
+  "lines": [
+    {
+      "destination": "ira",
+      "amount": 150.0,
+      "reasonCode": "capture_employer_match",
+      "reasonNumbers": {
+        "unclaimedMatchThisYear": 150.0,
+        "employerMatchPercent": 4
+      }
+    },
+    {
+      "destination": "card",
+      "amount": 300.0,
+      "reasonCode": "pay_high_interest_debt",
+      "reasonNumbers": {
+        "aprPercent": 24.0,
+        "cardBalance": 2400.0,
+        "monthlyInterestSaved": 6.0
+      }
+    },
+    {
+      "destination": "savings",
+      "amount": 150.0,
+      "reasonCode": "build_emergency_fund",
+      "reasonNumbers": {
+        "runwayMonthsBefore": 0.45,
+        "runwayMonthsAfter": 0.52,
+        "targetMonths": 1
+      }
+    }
+  ]
+}
