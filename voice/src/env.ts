@@ -13,4 +13,16 @@ export const env = {
   demoUserPhone: process.env.DEMO_USER_PHONE || "",
   databaseUrl: process.env.DATABASE_URL || "",
   elevenLabsWebhookSecret: process.env.ELEVENLABS_WEBHOOK_SECRET || "",
+  elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || "",
+  elevenLabsAgentId: process.env.ELEVENLABS_AGENT_ID || "",
+  /** The imported Photon number's id in ElevenLabs (Phone Numbers page). Needed for outbound calls. */
+  elevenLabsPhoneNumberId: process.env.ELEVENLABS_PHONE_NUMBER_ID || "",
+  /** Comma-separated E.164 numbers that agreed to be called. Defaults to the demo user only. */
+  optedInNumbers: (process.env.VOICE_OPTED_IN_NUMBERS || process.env.DEMO_USER_PHONE || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  /** Set VOICE_OUTBOUND=off to stop the call_requests poller (for example while testing inbound only). */
+  outboundEnabled: (process.env.VOICE_OUTBOUND || "on") !== "off",
+  timezone: process.env.DEMO_TIMEZONE || "America/Chicago",
 };
