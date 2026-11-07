@@ -13,6 +13,8 @@ import {
 } from "../../contracts/src";
 import type { Backend, EngineOps } from "./backend";
 import type { ScenarioName } from "./env";
+import { StubBackend } from "./stub/backend";
+import type { StubState } from "./stub/state";
 
 interface Parsable<T> {
   safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: unknown[] } };
@@ -62,9 +64,13 @@ const AdminBodies = {
  * The finance service. The contract endpoints (/health, /facts, /events, /tools/*) answer from the backend:
  * the real engine, or the fixture stub when FINANCE_MODE=stub. /admin/* controls the simulated world and is
  * not routed publicly by Caddy; the demo controller and CLI scripts call it on localhost.
+ *
+ * `state` (a StubState) is the original signature, kept because the agents service tests build the stub with it:
+ * createApp({ secret, state }) is the same as createApp({ secret, backend: new StubBackend(state) }).
  */
-export function createApp(opts: { secret: string; backend: Backend }) {
-  const { secret, backend } = opts;
+export function createApp(opts: { secret: string } & ({ backend: Backend; state?: never } | { state: StubState; backend?: never })) {
+  const { secret } = opts;
+  const backend: Backend = opts.backend ?? new StubBackend(opts.state);
   const app = new Hono();
 
   app.use("*", async (c, next) => {
