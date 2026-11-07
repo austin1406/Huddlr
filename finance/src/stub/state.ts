@@ -1,6 +1,6 @@
-import type { AcceptProposalResponse, FactsSnapshot, FinanceEvent, ProposalStatus, ProposalSummary } from "../../contracts/src";
-import { FIXTURES } from "./data/fixtures";
-import type { ScenarioName } from "./env";
+import type { AcceptProposalResponse, FactsSnapshot, FinanceEvent, ProposalStatus, ProposalSummary } from "../../../contracts/src";
+import { FIXTURES } from "../data/fixtures";
+import type { ScenarioName } from "../env";
 
 const byTime = (a: FinanceEvent, b: FinanceEvent) => a.occurredAt.localeCompare(b.occurredAt);
 

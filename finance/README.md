@@ -6,34 +6,61 @@ Owner: Austin Santhakumar (@austin1406), P1
 
 - 45-day forecast, 5 health indicators, plan optimizer, what-if simulator, shortfall flag
 - Nessie seed data source and sync (new items detected by ID)
-- Tool API served at stable URLs, with a stub that returns fixtures until the real logic lands
+- Tool API served at stable URLs (`FINANCE_MODE=engine`, the default; `FINANCE_MODE=stub` serves the contract fixtures only)
 - CLI scripts by H8: `post-purchase`, `post-transfer`, `post-paycheck`, `post-bill`, `jump-days N`, `reset`
 - The engine takes an `asOf` date from the shared `now()` and never reads the real clock for calendar logic
 
-## The stub (live now)
+## The engine (default)
 
-`finance/` currently serves the contract fixtures at the real URLs, so everyone can build against port 4000 before the engine exists. Every response carries the header `x-huddlr-data: fixture`. `can_i_afford`, `what_if` (purchase_now) and plan v0 are real logic over the fixture forecast; the other what-if scenarios return the fixture shape.
+The engine runs Maya's persona as a simulated customer. Nothing is faked per request: it keeps a ledger, and every answer is computed from it.
+
+- **Forecast:** 45 days from today. Each day: paycheck if payday, bills due, then the average daily spend; record the end-of-day balance. Safe to spend = lowest balance before the next payday minus the $100 cushion.
+- **Indicators:** runway, credit utilization, savings rate, bill reliability, retirement on track, each with the raw numbers and thresholds from `contracts/thresholds.json`.
+- **Clock:** every calendar decision uses `now()` = real time + the `sim_state` offset. Days that pass are settled when anything next reads: paychecks land, bills are paid (rent, car loan and the card minimum also pay down those balances), daily spending posts. A bill paid while checking is overdrawn counts as late and resets the on-time streak.
+- **Events:** detected from the ledger by source id, never by date, so nothing repeats: `paycheck_landed`, `big_purchase` (over $75), `bill_due_soon` (3 days), `forecast_problem` (negative balance within 14 days), `user_transfer_seen`, `p2p_imbalance`. Not yet: matching a transfer to a proposal and calling `complete` (the transfer watcher).
+- **What-if:** all four scenarios run against a copy of the ledger. Lost income also drops the savings rate to -100%.
+- **Proposals:** `get_pending_proposal` and `accept_proposal` forward to the agents service (`AGENTS_URL`, default `http://localhost:5000`). If it does not answer, nothing is pending and accept changes nothing.
+- **State:** ledger and event log are saved to `finance/.data/` (git-ignored) and survive restarts. The `sim_state` row is stored in Postgres when `DATABASE_URL` is set (the agents service reads it from there); otherwise in `finance/.data/sim_state.json`, which only this service can see.
+- **Fixture parity:** with a fresh ledger on 2026-11-07 the engine reproduces `contracts/fixtures/facts.fixture.json` exactly, and the shortfall fixture with `checking 33, last paid 12 days ago`. A test fails if either drifts.
+
+### Demo controls
+
+Run from `finance/` against the running service (`FINANCE_ADMIN_URL`, default `http://localhost:4000`; `/admin` is not routed by Caddy, so run these on the VM, or call the same routes from the demo controller on localhost).
+
+```bash
+npm run post-purchase -- 142.37 Target --category shopping     # add --account card to charge the card instead
+npm run post-transfer -- savings checking 143
+npm run post-paycheck                                          # lands a paycheck now; the next one is 14 days later
+npm run post-bill -- Vet 220 --in-days 1                       # or --date 2026-12-05, --nonessential
+npm run jump-days -- 21                                        # fast-forward the simulated clock
+npm run demo-mode -- on
+npm run scenario -- shortfall                                  # resets, then Maya has $33 and a $143 gap opens
+npm run reset                                                  # everything back to the start, clock and demo mode too
+npm run state                                                  # balances, clock, recent transactions
+```
+
+HTTP routes behind them: `GET /admin/state`, `POST /admin/purchase | transfer | paycheck | bill | scenario | reset | events`, `POST /admin/sim/jump-days | demo-mode`.
+
+Typical "rent week" demo: `npm run jump-days -- 21` (3 days before rent, `bill_due_soon` fires), then `npm run post-purchase -- 900 "Best Buy"` (`forecast_problem` fires and `shortfall` appears in `/facts`).
+
+## Testing
 
 ```bash
 cd finance && npm install && npm run dev      # http://localhost:4000
-npm test                                      # typecheck + 16 tests, responses validated against contracts/
+npm test                                      # typecheck + tests; every response is parsed with the contract schemas
 ```
 
-Auth: send `x-huddlr-secret: $HUDDLR_SECRET` on everything except `GET /health`. If `HUDDLR_SECRET` is unset, auth is off (local only).
+Auth: send `x-huddlr-secret: $HUDDLR_SECRET` on everything except `GET /health`. If `HUDDLR_SECRET` is unset, auth is off (local only). Every response carries `x-huddlr-data: engine` (or `fixture` in stub mode).
 
 | Endpoint | Notes |
 | --- | --- |
 | `GET /health` | open |
-| `GET /facts` | `?scenario=normal\|shortfall` to pick a fixture per request |
+| `GET /facts` | in stub mode, `?scenario=normal\|shortfall` picks a fixture per request |
 | `GET /events` | `?after=<eventId>&limit=50`, oldest first |
 | `POST /tools/get_snapshot`, `can_i_afford`, `what_if`, `get_plan`, `get_pending_proposal`, `accept_proposal` | bodies per `contracts/src/tools.ts`; 400 `invalid_request` on a bad body |
 
-Stub-only controls (not routed by Caddy, use from the VM or locally):
+## The stub
 
-- `GET/POST /admin/scenario` `{ "scenario": "shortfall" }` switches what `/facts` and the tools return, and resets state
-- `POST /admin/events` adds a `FinanceEvent` (deduped by id)
-- `POST /admin/reset` restores events and the pending proposal
-
-Shortfall scenario: `get_pending_proposal` returns `prop_demo_1`; `accept_proposal` accepts it once, then reports `already_accepted`.
+`FINANCE_MODE=stub` serves the contract fixtures at the same URLs, with the same admin routes for switching the fixture (`POST /admin/scenario`), injecting events (`POST /admin/events`) and resetting. The shortfall fixture has a pending proposal `prop_demo_1`. The engine-only routes (purchase, transfer, jump-days and so on) answer 501.
 
 Deploy on the VM: `finance/deploy/deploy.sh` (pm2 process `finance`, behind Caddy at `/facts*` and `/tools/*`).

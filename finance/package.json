@@ -5,15 +5,27 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "test": "tsc --noEmit && tsx --test test/*.test.ts"
+    "test": "tsc --noEmit && tsx --test test/*.test.ts",
+    "post-purchase": "tsx src/cli.ts post-purchase",
+    "post-transfer": "tsx src/cli.ts post-transfer",
+    "post-paycheck": "tsx src/cli.ts post-paycheck",
+    "post-bill": "tsx src/cli.ts post-bill",
+    "jump-days": "tsx src/cli.ts jump-days",
+    "demo-mode": "tsx src/cli.ts demo-mode",
+    "scenario": "tsx src/cli.ts scenario",
+    "reset": "tsx src/cli.ts reset",
+    "state": "tsx src/cli.ts state"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
     "dotenv": "^18.0.9",
-    "hono": "^4.13.17"
+    "hono": "^4.13.17",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

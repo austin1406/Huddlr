@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Finance engine state (ledger, event log, local sim clock)
+finance/.data/
+
 # Dependencies and builds
 node_modules/
 dist/
