@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "character_model": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash-lite",
+    "fallback_model": "gemini-2.5-flash",
+    "env_override": "CHARACTER_MODEL",
+    "max_output_tokens": 120,
+    "temperature": 0.7,
+    "timeout_ms": 4000
+  },
+  "moderator": {
+    "max_speakers_per_event": 3,
+    "coach_always_speaks_when_plan": true,
+    "daily_cap_proactive": 6,
+    "daily_cap_proactive_demo_mode": 40,
+    "quiet_hours": { "start": "21:30", "end": "08:00", "timezone": "America/Chicago" },
+    "digest_time": "19:00",
+    "clock": "Quiet hours, daily cap, and digest time are evaluated on the shared now() (simulated time).",
+    "demo_mode": "Bypasses quiet hours and uses daily_cap_proactive_demo_mode. Emergencies (priority 2) ignore both in every mode."
+  },
+  "debate": {
+    "first_message_target_ms": 5000,
+    "plan_target_ms": 15000,
+    "round2_only_if_ms_remaining": 6000,
+    "checker_retry_only_if_ms_remaining": 3000
+  },
+  "proposals": {
+    "ttl_minutes": 120,
+    "reminder_after_minutes": 60
+  },
+  "escalation": {
+    "shortfall_within_hours": 48,
+    "no_reply_cutoff_minutes": 90,
+    "call_type": "emergency"
+  },
+  "reply_classifier": {
+    "yes": ["yes", "y", "yep", "yeah", "do it", "ok", "okay", "sure", "approve", "go ahead"],
+    "no": ["no", "n", "nope", "nah", "not now", "decline", "stop", "skip"],
+    "rule": "Only an unambiguous yes accepts. Anything mixed or unclear counts as not approved and gets a clarifying question."
+  },
+  "number_checker": {
+    "rule": "Every number in a character message must equal a number in the facts snapshot or the plan (after normalization). Otherwise retry once if time allows, else send the template.",
+    "allowed_formats": ["$1,234.56", "$1234", "$1.2k", "1,234", "12%", "12.5%", "3 days", "Nov 14", "11/14"],
+    "always_allowed": ["0", "1", "2", "3"]
+  },
+  "safety_rules": [
+    "Agents never move money. They create a proposal; the user moves the money in their own bank.",
+    "Every number comes from the finance engine. The model only phrases it.",
+    "An unclear answer counts as no.",
+    "Never ask for passwords, one-time codes, PINs, SSNs, or account or card numbers.",
+    "No investment advice on specific securities. IRA talk stays at contribution and match level.",
+    "Never shame the user. Plain words, short messages, at most 2 sentences per character.",
+    "All data is synthetic; say so if asked."
+  ]
+}

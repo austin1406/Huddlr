@@ -27,3 +27,10 @@ One database row, `sim_state {offset_seconds, demo_mode}`, and one shared `now()
 - `demo_mode` bypasses quiet hours, relaxes the daily cap, and shortens typing gaps. Emergencies are unaffected.
 - The demo controller always lands on daytime simulated times.
 - New transactions are detected by ID, never by date.
+
+## P2 files (agents)
+
+- `p2_agents.sql`: `inbound_messages`, `outbox`, `proposals`, `call_requests`, `memory_messages`, `memory_facts`, `calls`, `follow_ups`, `agent_event_reactions`. Postgres, safe to re-run.
+- `agents.js`: outbox/inbound/proposal/call_request shapes and the `ProposalService` interface plus its HTTP endpoints. Only P2 writes `proposals`; everyone else calls the endpoints.
+- `cast.json`: the 6 characters (id, name, emoji, account, voice). P3 formats messages as `<emoji> <name>: <text>`.
+- `agents-config.json`: character model, moderator caps, quiet hours (simulated time), debate budgets, reply rules, safety rules.
