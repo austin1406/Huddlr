@@ -2,7 +2,7 @@
 
 iMessage text and images through Photon 2.0 (Beta docs only: `photon.codes/docs/beta/...`).
 
-Owner: P3
+Owner: Shreya Balaji (@shreyaBalaji1), P3
 
 ## Quick start (local)
 

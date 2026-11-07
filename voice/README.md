@@ -2,7 +2,7 @@
 
 Phone calls on a Photon SMS number (SIP) with a voice agent.
 
-Owner: TBD (P4)
+Owner: Rishi Vallabhaneni (@rishivallabhaneni), P4
 
 - Call-in "ask" line using the finance tools, with the option to ask for a character by name
 - Emergency outbound call from `call_requests`, with a text fallback
