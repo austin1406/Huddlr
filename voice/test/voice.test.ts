@@ -103,3 +103,24 @@ test("tools point at P1's endpoints with the shared secret header", () => {
   assert.equal(afford.api_schema.url, "https://huddlr.example/tools/can_i_afford");
   assert.equal(afford.api_schema.request_headers["x-huddlr-secret"], "abc");
 });
+
+test("caller allowlist: known numbers pass, unknown get no account details", async () => {
+  const { isAllowedCaller, unknownCallerVariables } = await import("../src/context");
+  assert.ok(isAllowedCaller("+12145550123", ["+12145550123"]));
+  assert.ok(!isAllowedCaller("+19995550000", ["+12145550123"]));
+  assert.ok(!isAllowedCaller(undefined, ["+12145550123"]));
+  assert.ok(isAllowedCaller("+19995550000", ["*"]));
+  assert.ok(isAllowedCaller("+19995550000", []));
+  const v = unknownCallerVariables();
+  assert.doesNotMatch(Object.values(v).join(" "), /\$|\d/);
+  assert.match(v.call_reason, /Do not call any tools/);
+});
+
+test("latency sample bodies match P1's request schemas", async () => {
+  const { SAMPLE_BODIES } = await import("../src/latency");
+  const t = await import("../../contracts/src/tools");
+  t.CanIAffordRequest.parse(SAMPLE_BODIES.can_i_afford);
+  t.WhatIfRequest.parse(SAMPLE_BODIES.what_if);
+  t.GetPlanRequest.parse(SAMPLE_BODIES.get_plan);
+  t.AcceptProposalRequest.parse(SAMPLE_BODIES.accept_proposal);
+});

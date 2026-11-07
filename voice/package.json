@@ -6,6 +6,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "agent-config": "tsx src/printAgentConfig.ts",
+    "latency": "tsx src/latency.ts",
     "test": "tsc --noEmit && tsx --test test/*.test.ts"
   },
   "dependencies": {

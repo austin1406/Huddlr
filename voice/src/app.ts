@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { TOOL_AUTH_HEADER } from "../../contracts/src/tools";
-import { buildDynamicVariables, initiationResponse } from "./context";
+import { buildDynamicVariables, initiationResponse, isAllowedCaller, unknownCallerVariables } from "./context";
 import { env } from "./env";
 import { fetchFacts } from "./finance";
 import { loadGoals, recordCallFailure, saveCall } from "./db";
@@ -15,6 +15,9 @@ app.get("/voice/health", (c) => c.json({ ok: true }));
 app.post("/voice/context", async (c) => {
   if (env.huddlrSecret && c.req.header(TOOL_AUTH_HEADER) !== env.huddlrSecret) return c.json({ error: "unauthorized" }, 401);
   const body = (await c.req.json().catch(() => ({}))) as { caller_id?: string };
+  if (!isAllowedCaller(body.caller_id, env.allowedCallers)) {
+    return c.json(initiationResponse(unknownCallerVariables()));
+  }
   const phone = body.caller_id || env.demoUserPhone;
   const [facts, goals] = await Promise.all([fetchFacts(), loadGoals(phone)]);
   return c.json(initiationResponse(buildDynamicVariables({ facts, goals })));
