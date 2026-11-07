@@ -41,6 +41,7 @@ test("allowed formats: rounding, k, commas, dates", () => {
     "Lowest point is $537.50 on Nov 19.",
     "Lowest point is $537.50 on 11/19.",
     "Payday is November 20th.",
+    "Payday is 2026-11-20.",
     "Phone bill of $65 is due Nov 12.",
   ]) assert.equal(checkMessage(msg, checking).ok, true, msg);
   assert.equal(checkMessage("Card is at $2.4k.", card).ok, true);
@@ -59,6 +60,11 @@ test("plan numbers count as grounded when passed in", () => {
   const line = plan.lines[0];
   const msg = `Put $${line.amount} toward ${line.destination}.`;
   assert.equal(checkMessage(msg, card, plan).ok, true);
+});
+
+test("ISO dates are read as dates, not three numbers", () => {
+  assert.deepEqual(extractNumbers("due 2026-11-20").map((f) => f.kind), ["date"]);
+  assert.equal(checkMessage("Rent is due 2026-01-31.", checking).ok, false);
 });
 
 test("extractor does not double count", () => {

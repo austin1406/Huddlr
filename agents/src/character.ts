@@ -64,6 +64,7 @@ export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: st
     `- At most 2 short sentences, plain words, no emoji, no "${c.name}:" prefix.`,
     `- Use ONLY numbers and dates that appear in FACTS, copied exactly. Never compute, estimate, or invent a number.`,
     `- If you need a number that is not in FACTS, say it without a number.`,
+    `- Write money like $1,186.50 and dates like Nov 20 (never 2026-11-20).`,
     `- Never move money, never ask for passwords, codes, or account numbers. No specific investment advice.`,
     `FACTS: ${JSON.stringify(factsFor(id, facts, event))}`,
     ...coachRules,

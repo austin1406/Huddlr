@@ -63,7 +63,8 @@ export function extractNumbers(text: string): Found[] {
     });
   };
 
-  // Dates: "Nov 14", "November 14th", "11/14", "11/14/2026"
+  // Dates: "2026-11-14", "Nov 14", "November 14th", "11/14", "11/14/2026"
+  take(/\b\d{4}-(\d{1,2})-(\d{1,2})\b/g, (m) => ({ raw: m[0], kind: "date", key: `${+m[1]}-${+m[2]}` }));
   take(new RegExp(`\\b(${MONTHS.join("|")})[a-z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"), (m) => ({
     raw: m[0], kind: "date", key: `${MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1}-${+m[2]}`,
   }));
