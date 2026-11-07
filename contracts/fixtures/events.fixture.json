@@ -1,0 +1,61 @@
+[
+  {
+    "id": "evt_paycheck_landed_nessie-deposit-0077",
+    "type": "paycheck_landed",
+    "occurredAt": "2026-11-06T13:00:00.000Z",
+    "severity": "low",
+    "accountId": "checking",
+    "data": {
+      "amount": 1650.0
+    }
+  },
+  {
+    "id": "evt_big_purchase_nessie-purchase-0412",
+    "type": "big_purchase",
+    "occurredAt": "2026-11-07T01:12:00.000Z",
+    "severity": "medium",
+    "accountId": "card",
+    "data": {
+      "merchant": "Target",
+      "amount": 142.37,
+      "category": "shopping"
+    }
+  },
+  {
+    "id": "evt_bill_due_soon_rent_2026-12-01",
+    "type": "bill_due_soon",
+    "occurredAt": "2026-11-28T16:00:00.000Z",
+    "severity": "medium",
+    "accountId": "checking",
+    "data": {
+      "billId": "rent",
+      "amount": 1100.0,
+      "dueDate": "2026-12-01",
+      "daysUntil": 3
+    }
+  },
+  {
+    "id": "evt_forecast_problem_2026-12-02",
+    "type": "forecast_problem",
+    "occurredAt": "2026-12-02T16:00:00.000Z",
+    "severity": "high",
+    "accountId": "checking",
+    "data": {
+      "firstNegativeDate": "2026-12-02",
+      "amount": 43.0
+    }
+  },
+  {
+    "id": "evt_user_transfer_seen_nessie-transfer-0031",
+    "type": "user_transfer_seen",
+    "occurredAt": "2026-12-02T17:05:00.000Z",
+    "severity": "low",
+    "accountId": "checking",
+    "data": {
+      "amount": 143.0,
+      "from": "savings",
+      "to": "checking",
+      "matchedProposalId": "prop_demo_1"
+    }
+  }
+]

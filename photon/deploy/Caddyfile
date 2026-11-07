@@ -1,0 +1,9 @@
+# Each path goes to one teammate's service. Ports agreed in contracts.
+__DOMAIN__ {
+    handle /photon/* { reverse_proxy localhost:3000 }   # P3 photon
+    handle /facts*   { reverse_proxy localhost:4000 }   # P1 finance
+    handle /tools/*  { reverse_proxy localhost:4000 }   # P1 finance
+    handle /agents/* { reverse_proxy localhost:5000 }   # P2 agents
+    handle /voice/*  { reverse_proxy localhost:6000 }   # P4 voice
+    handle           { reverse_proxy localhost:3001 }   # P3 dashboard
+}
