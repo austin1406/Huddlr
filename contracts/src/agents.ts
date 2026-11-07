@@ -170,8 +170,12 @@ export interface ProposalService {
 
 /**
  * Agents service HTTP API. All require the x-huddlr-secret header (TOOL_AUTH_HEADER).
+ * Full URL = PUBLIC_BASE_URL + AGENTS_BASE_PATH + path, e.g. https://<domain>/agents/proposals/7/accept.
  * Ids in paths are the numeric database ids; P1's finance wrapper converts its string ids with Number(id).
  */
+/** Caddy routes /agents/* to the agents service (port 5000), so every path below lives under this prefix. */
+export const AGENTS_BASE_PATH = "/agents";
+
 export const AGENT_ENDPOINTS = {
   health: { method: "GET", path: "/health" },
   getPending: { method: "GET", path: "/proposals/pending" }, // ?userPhone=+1...  (defaults to DEMO_USER_PHONE)

@@ -6,11 +6,21 @@
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && tsx --test test/*.test.ts",
     "card": "tsx --env-file-if-exists=../.env src/card-demo.ts",
-    "harness": "tsx --env-file-if-exists=../.env src/harness.ts"
+    "harness": "tsx --env-file-if-exists=../.env src/harness.ts",
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "@electric-sql/pglite": "^0.5.15",
+    "@types/pg": "^8.15.5"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.6",
+    "dotenv": "^18.0.9",
+    "hono": "^4.13.17",
+    "pg": "^8.16.3"
   }
 }
