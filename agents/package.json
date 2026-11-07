@@ -1,0 +1,16 @@
+{
+  "name": "huddlr-agents",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit && tsx --test test/*.test.ts",
+    "card": "tsx --env-file-if-exists=../.env src/card-demo.ts",
+    "harness": "tsx --env-file-if-exists=../.env src/harness.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
