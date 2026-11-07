@@ -14,8 +14,10 @@ export function buildDynamicVariables({ facts, goals, callReason }: CallStartInp
   const pending = facts?.pendingProposals.find((p) => p.status === "pending");
   const events = (facts?.recentEvents ?? []).slice(-3).map((e) => {
     const amount = typeof e.data.amount === "number" ? ` ${usd(e.data.amount)}` : "";
-    const label = typeof e.data.label === "string" ? ` ${e.data.label}` : "";
-    return `${e.type.replace(/_/g, " ")}${label}${amount}`;
+    const what = [e.data.label, e.data.merchant, e.data.billId].find((v) => typeof v === "string");
+    const label = what ? ` ${what}` : "";
+    const when = typeof e.data.dueDate === "string" ? ` due ${e.data.dueDate}` : typeof e.data.firstNegativeDate === "string" ? ` on ${e.data.firstNegativeDate}` : "";
+    return `${e.type.replace(/_/g, " ")}${label}${amount}${when}`;
   });
   const firstName = facts?.customer.firstName ?? "there";
   return {
@@ -30,6 +32,26 @@ export function buildDynamicVariables({ facts, goals, callReason }: CallStartInp
           .join("; ")
       : "none",
     call_reason: callReason ?? "the caller called in",
+  };
+}
+
+/** Whether an inbound caller is on the demo allowlist. Empty list or "*" lets everyone through. */
+export function isAllowedCaller(callerId: string | undefined, allowed: string[]): boolean {
+  if (!allowed.length || allowed.includes("*")) return true;
+  return !!callerId && allowed.includes(callerId);
+}
+
+/** Variables for a caller who isn't on the allowlist: no names, no numbers. */
+export function unknownCallerVariables(): Record<string, string> {
+  return {
+    opener: "Hi, this is the Huddlr Coach. This line is set up for the account owner's phone, so I can't share account details on this call.",
+    first_name: "there",
+    local_date: "unknown",
+    pending_proposal: "none",
+    recent_events: "none",
+    goals: "none",
+    call_reason:
+      "UNKNOWN CALLER. Do not call any tools and do not share any names, balances, or account details. Politely explain the line only works from the owner's phone, offer general money tips if asked, and end the call.",
   };
 }
 

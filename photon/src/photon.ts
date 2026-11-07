@@ -25,17 +25,29 @@ export async function sendText(t: Target, text: string, idempotencyKey: string, 
   });
 }
 
-/** Upload an image (PNG/JPEG bytes), then send it as an attachment. */
-export async function sendImage(t: Target, bytes: Uint8Array, contentType: string, idempotencyKey: string) {
-  const blob = new Blob([new Uint8Array(bytes)], { type: contentType });
+/**
+ * Upload an image (PNG/JPEG bytes), then send it as an attachment.
+ * Photon's upload is multipart/related with exactly two parts:
+ * 1) JSON { contentType, sizeBytes, filename }  2) the file bytes.
+ */
+export async function sendImage(t: Target, bytes: Uint8Array, contentType: string, idempotencyKey: string, filename = "image.png") {
+  const boundary = `huddlr-${Date.now().toString(36)}`;
+  const meta = JSON.stringify({ contentType, sizeBytes: bytes.byteLength, filename });
+  const enc = new TextEncoder();
+  const body = new Blob([
+    enc.encode(`--${boundary}\r\nContent-Type: application/json\r\n\r\n${meta}\r\n`),
+    enc.encode(`--${boundary}\r\nContent-Type: ${contentType}\r\n\r\n`),
+    new Uint8Array(bytes),
+    enc.encode(`\r\n--${boundary}--\r\n`),
+  ]);
   const attachment = await photon().projects.uploadAttachment({
     path: { id: env.projectId() },
     headers: {
-      "content-length": String(bytes.byteLength),
-      "content-type": contentType,
+      "content-length": String(body.size),
+      "content-type": `multipart/related; boundary=${boundary}`,
       "idempotency-key": `${idempotencyKey}:upload`,
     },
-    body: blob,
+    body,
   });
   return photon().projects.sendMessage({
     path: { id: env.projectId() },
