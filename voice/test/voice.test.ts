@@ -124,3 +124,26 @@ test("latency sample bodies match P1's request schemas", async () => {
   t.GetPlanRequest.parse(SAMPLE_BODIES.get_plan);
   t.AcceptProposalRequest.parse(SAMPLE_BODIES.accept_proposal);
 });
+
+test("setup: .env values are replaced in place, keep comments, and append when missing", async () => {
+  const { setEnvValues } = await import("../src/setupElevenLabs");
+  const out = setEnvValues("A=1\nELEVENLABS_AGENT_ID=\nVOICE_PORT=6000   # caddy\n", { ELEVENLABS_AGENT_ID: "agent_x", VOICE_PORT: "7000", NEW_KEY: "v" });
+  assert.match(out, /^ELEVENLABS_AGENT_ID=agent_x$/m);
+  assert.match(out, /^VOICE_PORT=7000  # caddy$/m);
+  assert.match(out, /^NEW_KEY=v$/m);
+  assert.match(out, /^A=1$/m);
+});
+
+test("setup: agent body references secrets by id, never by value", async () => {
+  const { agentBody, phoneBody, DYNAMIC_PLACEHOLDERS } = await import("../src/setupElevenLabs");
+  const a = JSON.stringify(agentBody({ baseUrl: "https://h.example", toolIds: ["t1"], secretId: "sec_1", webhookId: "wh_1" }));
+  assert.match(a, /"secret_id":"sec_1"/);
+  assert.match(a, /https:\/\/h\.example\/voice\/context/);
+  assert.match(a, /"post_call_webhook_id":"wh_1"/);
+  for (const v of ["opener", "first_name", "pending_proposal", "recent_events", "goals", "call_reason", "local_date"]) {
+    assert.ok(v in DYNAMIC_PLACEHOLDERS, v);
+  }
+  const p = phoneBody({ phoneNumber: "+18286472114", agentId: "ag", sipUser: "prj", sipPassword: "pw" });
+  assert.equal(p.outbound_trunk_config.address, "sip.spectrum.photon.codes");
+  assert.equal(p.outbound_trunk_config.transport, "tls");
+});
