@@ -1,6 +1,6 @@
 // One character turn: prompt -> Gemini -> number checker -> (retry once if time allows) -> template fallback.
 import { readFileSync } from "node:fs";
-import type { Account, CharacterId, FactsSnapshot, FinanceEvent, IndicatorId } from "../../contracts/src";
+import type { Account, CharacterId, FactsSnapshot, FinanceEvent, IndicatorId, Plan } from "../../contracts/src";
 import { checkMessage } from "./checker";
 
 const contractsDir = new URL("../../contracts/", import.meta.url);
@@ -53,8 +53,11 @@ export function factsFor(id: CharacterId, facts: FactsSnapshot, event?: FinanceE
   return { ...slice[id], event: latestEvent, pendingProposals: facts.pendingProposals };
 }
 
-export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: string, event?: FinanceEvent | null): string {
+export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: string, event?: FinanceEvent | null, plan?: Plan | null): string {
   const c = character(id);
+  const coachRules = id === "coach" && plan
+    ? [`- Give exactly this plan, line by line, with its amounts. End by asking for a clear YES.`, `PLAN: ${JSON.stringify(plan)}`]
+    : [];
   return [
     `You are ${c.name}, a bank account in a group chat with its owner. Personality: ${c.voice}`,
     `Rules:`,
@@ -63,6 +66,7 @@ export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: st
     `- If you need a number that is not in FACTS, say it without a number.`,
     `- Never move money, never ask for passwords, codes, or account numbers. No specific investment advice.`,
     `FACTS: ${JSON.stringify(factsFor(id, facts, event))}`,
+    ...coachRules,
     `SITUATION: ${situation}`,
   ].join("\n");
 }
@@ -70,7 +74,17 @@ export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: st
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** Grounded fallback built only from facts, so it always passes the checker. */
-export function template(id: CharacterId, facts: FactsSnapshot): string {
+const DEST: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+const destName = (d: string) => DEST[d] ?? d.replace(/^goal:/, "your ").replace(/_/g, " ") + (d.startsWith("goal:") ? " goal" : "");
+
+/** Coach's grounded plan message. */
+export function planTemplate(plan: Plan): string {
+  const lines = plan.lines.map((l) => `${usd(l.amount)} to ${destName(l.destination)}`);
+  return `Here's the plan: ${lines.join(", ")}. Reply YES to approve, or tell me what to change.`;
+}
+
+export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | null): string {
+  if (id === "coach" && plan) return planTemplate(plan);
   const a = (x: Account["id"]) => account(facts, x)!;
   switch (id) {
     case "card":
@@ -121,7 +135,7 @@ export async function speak(
   id: CharacterId,
   facts: FactsSnapshot,
   situation: string,
-  opts: { model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; extraSources?: unknown[] } = {},
+  opts: { model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; plan?: Plan | null; extraSources?: unknown[] } = {},
 ): Promise<SpeakResult> {
   const started = Date.now();
   const cm = config.character_model;
@@ -135,14 +149,15 @@ export async function speak(
         timeoutMs: Math.max(500, Math.min(cm.timeout_ms, deadline - Date.now())),
       }));
   const attempts: SpeakResult["attempts"] = [];
-  let prompt = buildPrompt(id, facts, situation, opts.event);
+  let prompt = buildPrompt(id, facts, situation, opts.event, opts.plan);
+  const sources = [factsFor(id, facts, opts.event), ...(opts.plan ? [opts.plan] : []), ...(opts.extraSources ?? [])];
 
   for (const source of ["model", "retry"] as const) {
     if (source === "retry" && deadline - Date.now() < config.debate.checker_retry_only_if_ms_remaining) break;
     try {
       const text = await model(prompt);
       // Checked against this character's own slice, not all 45 forecast days, so stray numbers can't sneak through.
-      const check = checkMessage(text, factsFor(id, facts, opts.event), ...(opts.extraSources ?? []));
+      const check = checkMessage(text, ...sources);
       attempts.push({ text, ...check });
       if (check.ok && text) return { text, source, attempts, ms: Date.now() - started };
       prompt += `\nYour last reply used numbers not in FACTS: ${check.ungrounded.map((u) => u.raw).join(", ")}. Rewrite without them.`;
@@ -150,5 +165,5 @@ export async function speak(
       attempts.push({ error: String((err as Error).message ?? err) });
     }
   }
-  return { text: template(id, facts), source: "template", attempts, ms: Date.now() - started };
+  return { text: template(id, facts, opts.plan), source: "template", attempts, ms: Date.now() - started };
 }
