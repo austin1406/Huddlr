@@ -3,8 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "card": "node --env-file-if-exists=../.env src/card-demo.js"
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit && tsx --test test/*.test.ts",
+    "card": "tsx --env-file-if-exists=../.env src/card-demo.ts"
   },
-  "engines": { "node": ">=22" }
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
 }
