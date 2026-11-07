@@ -2,7 +2,7 @@
 
 Plain-code finance engine. No AI here: every number the characters say comes from this folder.
 
-Owner: TBD (P1)
+Owner: Austin Santhakumar (@austin1406), P1
 
 - 45-day forecast, 5 health indicators, plan optimizer, what-if simulator, shortfall flag
 - Nessie seed data source and sync (new items detected by ID)
