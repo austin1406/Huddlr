@@ -5,8 +5,8 @@
 // History comes from a fixed random seed, so every run produces the same data.
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
-import { Nessie } from "./nessie.js";
-import { loadPersona, type Persona } from "./persona.js";
+import { Nessie } from "./nessie";
+import { loadPersona, type Persona } from "./persona";
 
 config({ path: fileURLToPath(new URL("../../.env", import.meta.url)) });
 
