@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "scenario": {
+    "type": "lose_income",
+    "months": 2
+  },
+  "before": {
+    "lowestBalance": {
+      "date": "2026-12-03",
+      "balance": 147.5
+    },
+    "firstNegativeDate": null,
+    "runwayMonths": 0.45,
+    "indicatorStatuses": {
+      "runway": "concern",
+      "credit_utilization": "watch",
+      "savings_rate": "watch",
+      "bill_reliability": "good",
+      "retirement_on_track": "watch"
+    }
+  },
+  "after": {
+    "lowestBalance": {
+      "date": "2026-12-21",
+      "balance": -2341.5
+    },
+    "firstNegativeDate": "2026-11-25",
+    "runwayMonths": 0.45,
+    "indicatorStatuses": {
+      "runway": "concern",
+      "credit_utilization": "watch",
+      "savings_rate": "concern",
+      "bill_reliability": "good",
+      "retirement_on_track": "watch"
+    }
+  },
+  "changedIndicators": [
+    {
+      "id": "savings_rate",
+      "from": "watch",
+      "to": "concern"
+    }
+  ],
+  "daysUntilNegative": 18
+}

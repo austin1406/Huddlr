@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cushion": 100,
+  "bigPurchaseMin": 75,
+  "billDueSoonDays": 3,
+  "forecastProblemWithinDays": 14,
+  "shortfallEscalationHours": 48,
+  "highInterestAprPercent": 8,
+  "emergencyFundMonths": [1, 3],
+  "indicators": {
+    "runway": { "unit": "months", "direction": "higher_is_better", "goodAt": 3, "concernAt": 1 },
+    "credit_utilization": { "unit": "percent", "direction": "lower_is_better", "goodAt": 30, "concernAt": 50 },
+    "savings_rate": { "unit": "percent", "direction": "higher_is_better", "goodAt": 20, "concernAt": 10 },
+    "bill_reliability": { "unit": "count", "direction": "higher_is_better", "goodAt": 6, "concernAt": 3 },
+    "retirement_on_track": { "unit": "percent", "direction": "higher_is_better", "goodAt": 90, "concernAt": 60 }
+  }
+}
