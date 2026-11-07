@@ -2,7 +2,7 @@
 
 The cast: moderator, six characters, number checker, proposals, memory.
 
-Owner: TBD (P2)
+Owner: Sreyas Chakka (@sreyas-chakka), P2
 
 - Moderator: at most 3 speakers, quiet hours, daily cap, evening digest
 - Debates: positions and the Coach's plan generated in parallel; budget of about 5 seconds to the first message and 15 to the plan

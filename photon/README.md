@@ -2,7 +2,7 @@
 
 iMessage text and images through Photon 2.0 (Beta docs only).
 
-Owner: TBD (P3)
+Owner: Shreya Balaji (@shreyaBalaji1), P3
 
 - Webhook with signature check and duplicate protection
 - Outbox sender: one message at a time, 1-3 second gaps, retries, idempotent by outbox ID

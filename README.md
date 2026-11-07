@@ -39,11 +39,11 @@ Dashboard (read-only) <- database.
 | Folder | What lives here | Owner |
 |---|---|---|
 | `contracts/` | Shared schemas, fixtures, the clock helper. Additive changes only. | everyone |
-| `finance/` | Forecast, indicators, optimizer, what-if, Nessie sync, tool API | TBD (P1) |
-| `agents/` | Moderator, characters, number checker, proposals, memory | TBD (P2) |
-| `photon/` | iMessage webhook, outbox sender, image cards | TBD (P3) |
-| `dashboard/` | Read-only dashboard and demo controller | TBD (P3) |
-| `voice/` | Voice agent, call webhooks, seed script | TBD (P4) |
+| `finance/` | Forecast, indicators, optimizer, what-if, Nessie sync, tool API | Austin (P1) |
+| `agents/` | Moderator, characters, number checker, proposals, memory | Sreyas (P2) |
+| `photon/` | iMessage webhook, outbox sender, image cards | Shreya (P3) |
+| `dashboard/` | Read-only dashboard and demo controller | Shreya (P3) |
+| `voice/` | Voice agent, call webhooks, seed script | Rishi (P4) |
 | `scripts/` | CLI helpers (seed, post purchase, jump days, reset) | shared |
 | `docs/` | Timeline, runbooks, metrics | everyone |
 
