@@ -48,9 +48,19 @@ Update later with `/opt/huddlr/photon/deploy/deploy.sh`.
 - Shared lines support direct chats only (no groups).
 - Webhooks: verify the raw body, return 2xx fast, dedupe by `webhook-id`; Photon retries on 404/408/429/5xx.
 
+## How messages flow
+
+- **In:** Photon webhook → signature check → `inbound_messages` row (duplicate deliveries ignored via `provider_msg_id`). If the DB write fails we return 503 so Photon retries. P2's agents poll that table.
+- **Out:** agents write `outbox` rows. The sender claims one at a time (priority, then oldest), shows typing, waits 1-3 s (0.3-0.8 s in demo mode), sends `<emoji> <Name>: <text>`, threads under `reply_to`, marks `sent`. Failures retry with backoff; after 3 attempts the row is `failed` with `last_error`.
+- **Held:** Photon can't text someone first. If a phone hasn't texted the line yet, its rows go to `held` and are released the moment that person texts.
+- `p3_photon_spaces` remembers each phone's Photon conversation (`space_id`, our agent's user id) from their first text. `p3_outbox_sends` records Photon's message id and delivery time.
+
+Settings: `DATABASE_URL` (shared `/opt/huddlr/.env`), `PHOTON_SENDER=0` pauses the sender, `PHOTON_ECHO=1` is the old spike auto-reply (keep it off with agents running). `GET /photon/health` shows `db` and `sender`.
+
+`npm test` runs the whole flow against an in-memory Postgres.
+
 ## Planned
 
-- Webhook writes inbound rows to the DB (H3-4)
-- Outbox sender: one at a time, 1-3 s gaps, retries, idempotent by outbox id (H4-5)
-- Indicator card PNG renderer (H6-7), seat tool (H8-9)
-- Findings in `docs/photon.md`
+- Indicator card PNG renderer for `attachment: indicator_card` (H6-7); until then those rows send text only
+- Store inbound photos and expose the path to P2 (H7-8)
+- Seat tool (H8-9)
