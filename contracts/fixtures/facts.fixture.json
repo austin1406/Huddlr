@@ -1,0 +1,440 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-11-07T16:00:00.000Z",
+  "localDate": "2026-11-07",
+  "timezone": "America/Chicago",
+  "customer": {
+    "id": "demo-maya",
+    "firstName": "Maya"
+  },
+  "simulatedFields": [
+    "ira",
+    "card_apr",
+    "card_limit",
+    "car_loan_terms",
+    "goals",
+    "essential_daily_spend"
+  ],
+  "accounts": [
+    {
+      "id": "checking",
+      "kind": "checking",
+      "name": "Checking",
+      "characterId": "checking",
+      "balance": 1186.5
+    },
+    {
+      "id": "savings",
+      "kind": "savings",
+      "name": "Savings",
+      "characterId": "savings",
+      "balance": 900.0
+    },
+    {
+      "id": "card",
+      "kind": "credit_card",
+      "name": "Credit Card",
+      "characterId": "card",
+      "balance": 2400.0,
+      "limit": 5000.0,
+      "aprPercent": 24.0,
+      "minimumPayment": 72.0,
+      "simulated": true
+    },
+    {
+      "id": "car_loan",
+      "kind": "car_loan",
+      "name": "Car Loan",
+      "characterId": "car_loan",
+      "balance": 14500.0,
+      "aprPercent": 6.9,
+      "monthlyPayment": 320.0,
+      "simulated": true
+    },
+    {
+      "id": "ira",
+      "kind": "ira",
+      "name": "IRA",
+      "characterId": "ira",
+      "balance": 8200.0,
+      "simulated": true,
+      "retirementTarget": 13200.0,
+      "employerMatchPercent": 4,
+      "userContributionPercent": 2,
+      "unclaimedMatchThisYear": 150.0,
+      "daysSinceLastContribution": 94
+    }
+  ],
+  "upcomingBills": [
+    {
+      "id": "phone",
+      "label": "Phone",
+      "amount": 65.0,
+      "dueDate": "2026-11-12",
+      "essential": true
+    },
+    {
+      "id": "utilities",
+      "label": "Utilities",
+      "amount": 90.0,
+      "dueDate": "2026-11-18",
+      "essential": true
+    },
+    {
+      "id": "streaming",
+      "label": "Streaming",
+      "amount": 16.0,
+      "dueDate": "2026-11-22",
+      "essential": false
+    },
+    {
+      "id": "car_loan",
+      "label": "Car loan payment",
+      "amount": 320.0,
+      "dueDate": "2026-11-25",
+      "essential": true
+    },
+    {
+      "id": "card_minimum",
+      "label": "Card minimum payment",
+      "amount": 72.0,
+      "dueDate": "2026-11-28",
+      "essential": true
+    },
+    {
+      "id": "rent",
+      "label": "Rent",
+      "amount": 1100.0,
+      "dueDate": "2026-12-01",
+      "essential": true
+    }
+  ],
+  "upcomingPaychecks": [
+    {
+      "date": "2026-11-20",
+      "amount": 1650.0
+    },
+    {
+      "date": "2026-12-04",
+      "amount": 1650.0
+    },
+    {
+      "date": "2026-12-18",
+      "amount": 1650.0
+    }
+  ],
+  "forecast": {
+    "startDate": "2026-11-07",
+    "endDate": "2026-12-21",
+    "days": [
+      {
+        "date": "2026-11-07",
+        "balance": 1148.5
+      },
+      {
+        "date": "2026-11-08",
+        "balance": 1110.5
+      },
+      {
+        "date": "2026-11-09",
+        "balance": 1072.5
+      },
+      {
+        "date": "2026-11-10",
+        "balance": 1034.5
+      },
+      {
+        "date": "2026-11-11",
+        "balance": 996.5
+      },
+      {
+        "date": "2026-11-12",
+        "balance": 893.5
+      },
+      {
+        "date": "2026-11-13",
+        "balance": 855.5
+      },
+      {
+        "date": "2026-11-14",
+        "balance": 817.5
+      },
+      {
+        "date": "2026-11-15",
+        "balance": 779.5
+      },
+      {
+        "date": "2026-11-16",
+        "balance": 741.5
+      },
+      {
+        "date": "2026-11-17",
+        "balance": 703.5
+      },
+      {
+        "date": "2026-11-18",
+        "balance": 575.5
+      },
+      {
+        "date": "2026-11-19",
+        "balance": 537.5
+      },
+      {
+        "date": "2026-11-20",
+        "balance": 2149.5
+      },
+      {
+        "date": "2026-11-21",
+        "balance": 2111.5
+      },
+      {
+        "date": "2026-11-22",
+        "balance": 2057.5
+      },
+      {
+        "date": "2026-11-23",
+        "balance": 2019.5
+      },
+      {
+        "date": "2026-11-24",
+        "balance": 1981.5
+      },
+      {
+        "date": "2026-11-25",
+        "balance": 1623.5
+      },
+      {
+        "date": "2026-11-26",
+        "balance": 1585.5
+      },
+      {
+        "date": "2026-11-27",
+        "balance": 1547.5
+      },
+      {
+        "date": "2026-11-28",
+        "balance": 1437.5
+      },
+      {
+        "date": "2026-11-29",
+        "balance": 1399.5
+      },
+      {
+        "date": "2026-11-30",
+        "balance": 1361.5
+      },
+      {
+        "date": "2026-12-01",
+        "balance": 223.5
+      },
+      {
+        "date": "2026-12-02",
+        "balance": 185.5
+      },
+      {
+        "date": "2026-12-03",
+        "balance": 147.5
+      },
+      {
+        "date": "2026-12-04",
+        "balance": 1759.5
+      },
+      {
+        "date": "2026-12-05",
+        "balance": 1721.5
+      },
+      {
+        "date": "2026-12-06",
+        "balance": 1683.5
+      },
+      {
+        "date": "2026-12-07",
+        "balance": 1645.5
+      },
+      {
+        "date": "2026-12-08",
+        "balance": 1607.5
+      },
+      {
+        "date": "2026-12-09",
+        "balance": 1569.5
+      },
+      {
+        "date": "2026-12-10",
+        "balance": 1531.5
+      },
+      {
+        "date": "2026-12-11",
+        "balance": 1493.5
+      },
+      {
+        "date": "2026-12-12",
+        "balance": 1390.5
+      },
+      {
+        "date": "2026-12-13",
+        "balance": 1352.5
+      },
+      {
+        "date": "2026-12-14",
+        "balance": 1314.5
+      },
+      {
+        "date": "2026-12-15",
+        "balance": 1276.5
+      },
+      {
+        "date": "2026-12-16",
+        "balance": 1238.5
+      },
+      {
+        "date": "2026-12-17",
+        "balance": 1200.5
+      },
+      {
+        "date": "2026-12-18",
+        "balance": 2722.5
+      },
+      {
+        "date": "2026-12-19",
+        "balance": 2684.5
+      },
+      {
+        "date": "2026-12-20",
+        "balance": 2646.5
+      },
+      {
+        "date": "2026-12-21",
+        "balance": 2608.5
+      }
+    ],
+    "lowest": {
+      "date": "2026-12-03",
+      "balance": 147.5
+    },
+    "lowestBeforeNextPayday": {
+      "date": "2026-11-19",
+      "balance": 537.5
+    },
+    "firstNegativeDate": null,
+    "firstBelowCushionDate": null,
+    "cushion": 100,
+    "nextPayday": "2026-11-20",
+    "safeToSpendUntilPayday": 437.5
+  },
+  "indicators": [
+    {
+      "id": "runway",
+      "label": "Runway",
+      "value": 0.45,
+      "unit": "months",
+      "status": "concern",
+      "direction": "higher_is_better",
+      "goodAt": 3,
+      "concernAt": 1,
+      "ownerCharacter": "savings",
+      "inputs": {
+        "savings": 900.0,
+        "monthlyEssentials": 2007.0
+      }
+    },
+    {
+      "id": "credit_utilization",
+      "label": "Credit utilization",
+      "value": 48.0,
+      "unit": "percent",
+      "status": "watch",
+      "direction": "lower_is_better",
+      "goodAt": 30,
+      "concernAt": 50,
+      "ownerCharacter": "card",
+      "inputs": {
+        "cardBalance": 2400.0,
+        "cardLimit": 5000.0
+      }
+    },
+    {
+      "id": "savings_rate",
+      "label": "Savings rate (30 days)",
+      "value": 10.6,
+      "unit": "percent",
+      "status": "watch",
+      "direction": "higher_is_better",
+      "goodAt": 20,
+      "concernAt": 10,
+      "ownerCharacter": "savings",
+      "inputs": {
+        "income30d": 3300.0,
+        "spending30d": 2950.0
+      }
+    },
+    {
+      "id": "bill_reliability",
+      "label": "Bill reliability",
+      "value": 11,
+      "unit": "count",
+      "status": "good",
+      "direction": "higher_is_better",
+      "goodAt": 6,
+      "concernAt": 3,
+      "ownerCharacter": "checking",
+      "inputs": {
+        "streak": 11
+      }
+    },
+    {
+      "id": "retirement_on_track",
+      "label": "Retirement on track",
+      "value": 62.1,
+      "unit": "percent",
+      "status": "watch",
+      "direction": "higher_is_better",
+      "goodAt": 90,
+      "concernAt": 60,
+      "ownerCharacter": "ira",
+      "inputs": {
+        "iraBalance": 8200.0,
+        "target": 13200.0
+      }
+    }
+  ],
+  "pendingProposals": [],
+  "recentEvents": [
+    {
+      "id": "evt_paycheck_landed_nessie-deposit-0077",
+      "type": "paycheck_landed",
+      "occurredAt": "2026-11-06T13:00:00.000Z",
+      "severity": "low",
+      "accountId": "checking",
+      "data": {
+        "amount": 1650.0
+      }
+    },
+    {
+      "id": "evt_big_purchase_nessie-purchase-0412",
+      "type": "big_purchase",
+      "occurredAt": "2026-11-07T01:12:00.000Z",
+      "severity": "medium",
+      "accountId": "card",
+      "data": {
+        "merchant": "Target",
+        "amount": 142.37,
+        "category": "shopping"
+      }
+    },
+    {
+      "id": "evt_bill_due_soon_rent_2026-12-01",
+      "type": "bill_due_soon",
+      "occurredAt": "2026-11-28T16:00:00.000Z",
+      "severity": "medium",
+      "accountId": "checking",
+      "data": {
+        "billId": "rent",
+        "amount": 1100.0,
+        "dueDate": "2026-12-01",
+        "daysUntil": 3
+      }
+    }
+  ],
+  "shortfall": null
+}

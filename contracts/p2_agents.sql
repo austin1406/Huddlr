@@ -22,12 +22,12 @@ CREATE TABLE IF NOT EXISTS outbox (
   id              BIGSERIAL PRIMARY KEY,
   idempotency_key TEXT UNIQUE NOT NULL,          -- e.g. 'evt:<event_id>:<speaker>' so a retry never double-sends
   user_phone      TEXT NOT NULL,                 -- E.164
-  speaker         TEXT NOT NULL,                 -- cast id: checking | savings | card | car_loan | ira | coach | system
+  speaker         TEXT NOT NULL,                 -- CharacterId (checking | savings | card | car_loan | ira | coach) or system
   text            TEXT NOT NULL,                 -- body only; P3 formats as "<emoji> <Name>: <text>"
   attachment      TEXT CHECK (attachment IN ('indicator_card')),   -- nullable
   reply_to        BIGINT REFERENCES inbound_messages(id),           -- nullable; threaded reply if Photon supports it
   thread_key      TEXT,                          -- groups one debate/digest (e.g. 'evt:<event_id>')
-  event_id        TEXT,                          -- P1 events.id this reacts to, nullable
+  event_id        TEXT,                          -- P1 FinanceEvent.id this reacts to, nullable
   proposal_id     BIGINT,                        -- proposals.id this mentions, nullable
   priority        SMALLINT NOT NULL DEFAULT 0,   -- 2 = emergency (ignores quiet hours), 1 = reply, 0 = proactive
   status          TEXT NOT NULL DEFAULT 'pending'
@@ -44,10 +44,11 @@ CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox (status, priority DESC, 
 CREATE TABLE IF NOT EXISTS proposals (
   id               BIGSERIAL PRIMARY KEY,
   user_phone       TEXT NOT NULL,
-  plan             JSONB NOT NULL,               -- P1 plan shape: [{destination, amount, reason_code, reason_numbers}]
-  from_account     TEXT NOT NULL,
-  to_account       TEXT NOT NULL,
-  amount_cents     BIGINT NOT NULL CHECK (amount_cents > 0),
+  plan             JSONB NOT NULL,               -- P1's Plan object verbatim (camelCase: lines, reasonCode, reasonNumbers)
+  from_account     TEXT NOT NULL CHECK (from_account IN ('checking','savings','card','car_loan','ira')),
+  to_account       TEXT NOT NULL CHECK (to_account IN ('checking','savings','card','car_loan','ira')),
+  amount_cents     BIGINT NOT NULL CHECK (amount_cents > 0),   -- dollars from P1 * 100, rounded
+  action_text      TEXT NOT NULL,                -- "Move $143 from Savings to Checking" (ProposalSummary.actionText)
   source_event_id  TEXT,
   status           TEXT NOT NULL DEFAULT 'pending'
                    CHECK (status IN ('pending','accepted','declined','expired','completed')),
@@ -67,7 +68,7 @@ CREATE TABLE IF NOT EXISTS call_requests (
   user_phone      TEXT NOT NULL,
   type            TEXT NOT NULL CHECK (type IN ('emergency','monthly_recap')),
   proposal_id     BIGINT REFERENCES proposals(id),
-  shortfall       JSONB,                         -- copy of P1's shortfall flag {amount, date, account}
+  shortfall       JSONB,                         -- {amount_cents, date, account} from P1's Shortfall (toCallShortfall)
   script_hint     TEXT,                          -- short opener for the voice agent
   status          TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending','calling','answered','no_answer','busy','failed','cancelled')),
@@ -137,7 +138,7 @@ CREATE INDEX IF NOT EXISTS follow_ups_due_idx ON follow_ups (status, due_at);
 
 -- Events P2 has already reacted to (never react to the same event id twice).
 CREATE TABLE IF NOT EXISTS agent_event_reactions (
-  event_id        TEXT PRIMARY KEY,              -- P1 events.id
+  event_id        TEXT PRIMARY KEY,              -- P1 FinanceEvent.id
   user_phone      TEXT NOT NULL,
   outcome         TEXT NOT NULL CHECK (outcome IN ('reacted','digested','skipped')),
   reacted_sim_at  TIMESTAMPTZ NOT NULL
