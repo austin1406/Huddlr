@@ -53,10 +53,14 @@ export function factsFor(id: CharacterId, facts: FactsSnapshot, event?: FinanceE
   return { ...slice[id], event: latestEvent, pendingProposals: facts.pendingProposals };
 }
 
-export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: string, event?: FinanceEvent | null, plan?: Plan | null): string {
+export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: string, event?: FinanceEvent | null, plan?: Plan | null, ask?: string | null): string {
   const c = character(id);
   const coachRules = id === "coach" && plan
-    ? [`- Give exactly this plan, line by line, with its amounts. End by asking for a clear YES.`, `PLAN: ${JSON.stringify(plan)}`]
+    ? [
+        `- In one short sentence, say why this plan settles it. Then end with exactly: "Reply YES to: ${ask ?? "this plan"}."`,
+        `- At most 3 sentences. Only amounts from PLAN or FACTS.`,
+        `PLAN: ${JSON.stringify(plan)}`,
+      ]
     : [];
   return [
     `You are ${c.name}, a bank account in a group chat with its owner. Personality: ${c.voice}`,
@@ -78,14 +82,25 @@ const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits
 const DEST: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
 const destName = (d: string) => DEST[d] ?? d.replace(/^goal:/, "your ").replace(/_/g, " ") + (d.startsWith("goal:") ? " goal" : "");
 
-/** Coach's grounded plan message. */
-export function planTemplate(plan: Plan): string {
-  const lines = plan.lines.map((l) => `${usd(l.amount)} to ${destName(l.destination)}`);
-  return `Here's the plan: ${lines.join(", ")}. Reply YES to approve, or tell me what to change.`;
+const REASON: Record<string, string> = {
+  cover_shortfall: "so Checking doesn't go negative",
+  pay_high_interest_debt: "to cut the highest interest first",
+  build_emergency_fund: "to grow your cushion",
+  capture_employer_match: "to grab the free employer match",
+  fund_goal: "toward your goal",
+  extra_retirement: "for retirement",
+  extra_debt_payment: "to pay down debt",
+};
+
+/** Coach's grounded plan message. `ask` is the proposal's action text, the one thing a YES approves. */
+export function planTemplate(plan: Plan, ask?: string | null): string {
+  const lines = plan.lines.map((l) => `${usd(l.amount)} to ${destName(l.destination)} ${REASON[l.reasonCode] ?? ""}`.trim());
+  const head = lines.length === 1 ? `Here's the call: ${lines[0]}.` : `Here's the plan: ${lines.join("; ")}.`;
+  return ask ? `${head} Reply YES to: ${ask}.` : `${head} Reply YES to approve, or tell me what to change.`;
 }
 
-export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | null): string {
-  if (id === "coach" && plan) return planTemplate(plan);
+export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | null, ask?: string | null): string {
+  if (id === "coach" && plan) return planTemplate(plan, ask);
   const a = (x: Account["id"]) => account(facts, x)!;
   switch (id) {
     case "card":
@@ -136,7 +151,7 @@ export async function speak(
   id: CharacterId,
   facts: FactsSnapshot,
   situation: string,
-  opts: { model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; plan?: Plan | null; extraSources?: unknown[] } = {},
+  opts: { model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; plan?: Plan | null; ask?: string | null; extraSources?: unknown[] } = {},
 ): Promise<SpeakResult> {
   const started = Date.now();
   const cm = config.character_model;
@@ -150,7 +165,7 @@ export async function speak(
         timeoutMs: Math.max(500, Math.min(cm.timeout_ms, deadline - Date.now())),
       }));
   const attempts: SpeakResult["attempts"] = [];
-  let prompt = buildPrompt(id, facts, situation, opts.event, opts.plan);
+  let prompt = buildPrompt(id, facts, situation, opts.event, opts.plan, opts.ask);
   const sources = [factsFor(id, facts, opts.event), ...(opts.plan ? [opts.plan] : []), ...(opts.extraSources ?? [])];
 
   for (const source of ["model", "retry"] as const) {
@@ -166,5 +181,5 @@ export async function speak(
       attempts.push({ error: String((err as Error).message ?? err) });
     }
   }
-  return { text: template(id, facts, opts.plan), source: "template", attempts, ms: Date.now() - started };
+  return { text: template(id, facts, opts.plan, opts.ask), source: "template", attempts, ms: Date.now() - started };
 }

@@ -143,3 +143,13 @@ CREATE TABLE IF NOT EXISTS agent_event_reactions (
   outcome         TEXT NOT NULL CHECK (outcome IN ('reacted','digested','skipped')),
   reacted_sim_at  TIMESTAMPTZ NOT NULL
 );
+
+-- Small key/value state for the agents service, e.g. the last finance event id it has read ('events_cursor').
+CREATE TABLE IF NOT EXISTS agent_state (
+  key             TEXT PRIMARY KEY,
+  value           TEXT NOT NULL,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- The event itself, so the evening digest can describe what was held back.
+ALTER TABLE agent_event_reactions ADD COLUMN IF NOT EXISTS event JSONB;
