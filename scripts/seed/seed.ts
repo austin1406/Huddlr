@@ -1,8 +1,8 @@
-// Seeds the Nessie demo customer from persona.json.
+// Seeds the Nessie demo customer from contracts/persona.json.
 //   npm run seed         create the customer if it does not exist yet (safe to re-run)
 //   npm run seed:reset   delete all Nessie data for this key, then seed fresh
 //   npm run seed:dry     print every request without sending anything
-// History is generated from a fixed random seed, so every run produces the same data.
+// History comes from a fixed random seed, so every run produces the same data.
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { Nessie } from "./nessie.js";
@@ -32,24 +32,58 @@ function rng(seed: number) {
   };
 }
 
-const day = (d: Date) => d.toISOString().slice(0, 10);
-const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
-const money = (n: number) => Math.round(n * 100) / 100;
+const DAY_MS = 86_400_000;
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const cents = (n: number) => Math.round(n * 100);
 
 const ADDRESS = { street_number: "800", street_name: "W Campbell Rd", city: "Richardson", state: "TX", zip: "75080" };
+
+export interface PlannedPurchase {
+  daysAgo: number;
+  merchant: number; // index into seedHints.merchants
+  amount: number; // dollars, 2 decimals
+  onCard: boolean;
+}
+
+/**
+ * Builds the discretionary purchase history from seedHints, then scales it so the daily average
+ * matches spending.averageDailyDiscretionary exactly (P1's golden test compares against it).
+ */
+export function planPurchases(p: Persona, rand: () => number): PlannedPurchase[] {
+  const days = p.seedHints.historyDays;
+  const raw: PlannedPurchase[] = [];
+  for (let daysAgo = days - 1; daysAgo >= 0; daysAgo--) {
+    p.seedHints.merchants.forEach((m, merchant) => {
+      if (rand() < m.perWeek / 7) {
+        const [lo, hi] = m.typicalAmount;
+        raw.push({ daysAgo, merchant, amount: lo + rand() * (hi - lo), onCard: rand() < 0.65 });
+      }
+    });
+  }
+  const targetCents = cents(p.spending.averageDailyDiscretionary * days);
+  const rawTotal = raw.reduce((s, x) => s + x.amount, 0);
+  const scale = (targetCents / 100) / rawTotal;
+  const out = raw.map((x) => ({ ...x, amount: cents(x.amount * scale) / 100 }));
+  // Put any rounding remainder on the last purchase so the total is exact to the cent.
+  const diff = targetCents - out.reduce((s, x) => s + cents(x.amount), 0);
+  out[out.length - 1].amount = (cents(out[out.length - 1].amount) + diff) / 100;
+  return out;
+}
 
 async function findCustomer(api: Nessie, p: Persona): Promise<string | undefined> {
   if (DRY) return undefined;
   const all = await api.get<{ _id: string; first_name: string; last_name: string }[]>("/customers");
-  return all.find((c) => c.first_name === p.customer.first_name && c.last_name === p.customer.last_name)?._id;
+  return all.find((c) => c.first_name === p.customer.firstName && c.last_name === p.customer.lastName)?._id;
 }
 
 async function main() {
   const p = loadPersona();
   const api = new Nessie(key, base, DRY);
   const rand = rng(20261107);
-  const today = new Date(`${p.paycheck.last_date}T12:00:00Z`);
-  const start = addDays(today, -p.history_days);
+  // "Today" is the real date. TODO: switch to the shared now() helper once contracts merge.
+  const today = new Date(`${isoDay(new Date())}T12:00:00Z`);
+  const dateFor = (daysAgo: number) => isoDay(new Date(today.getTime() - daysAgo * DAY_MS));
+  const days = p.seedHints.historyDays;
 
   if (RESET) {
     console.log("Reset: deleting all Nessie data for this key (shared with P1)");
@@ -64,78 +98,86 @@ async function main() {
     }
   }
 
-  const customerId = await api.create("/customers", { ...p.customer, address: ADDRESS });
+  const customerId = await api.create("/customers", {
+    first_name: p.customer.firstName,
+    last_name: p.customer.lastName,
+    address: ADDRESS,
+  });
+  // Balances are sent exactly as in persona.json. If Nessie only accepts integers, P1's spike
+  // (docs/nessie.md) will say so and the own-ledger mirror covers the cents.
   const acct = (type: string, nickname: string, balance: number) =>
-    api.create(`/customers/${customerId}/accounts`, { type, nickname, rewards: 0, balance: Math.round(balance) });
+    api.create(`/customers/${customerId}/accounts`, { type, nickname, rewards: 0, balance });
   const checking = await acct("Checking", "Checking", p.accounts.checking.balance);
   const savings = await acct("Savings", "Savings", p.accounts.savings.balance);
-  const card = await acct("Credit Card", "Card", p.accounts.credit_card.balance);
+  const card = await acct("Credit Card", "Card", p.accounts.card.balance);
 
   const merchantIds: string[] = [];
-  for (const m of p.merchants) {
+  for (const m of p.seedHints.merchants) {
     merchantIds.push(
       await api.create("/merchants", { name: m.name, category: m.category, address: ADDRESS, geocode: { lat: 32.98, lng: -96.75 } }),
     );
   }
 
-  const counts = { purchases: 0, deposits: 0, bills: 0, transfers: 0 };
+  const purchases = planPurchases(p, rand);
+  for (const x of purchases) {
+    await api.create(`/accounts/${x.onCard ? card : checking}/purchases`, {
+      merchant_id: merchantIds[x.merchant],
+      medium: "balance",
+      purchase_date: dateFor(x.daysAgo),
+      amount: x.amount,
+      description: p.seedHints.merchants[x.merchant].name,
+    });
+  }
 
-  for (let d = new Date(start); d <= today; d = addDays(d, 1)) {
-    const date = day(d);
+  let deposits = 0;
+  let bills = 0;
+  for (let daysAgo = days - 1; daysAgo >= 0; daysAgo--) {
+    const date = dateFor(daysAgo);
 
-    // 1-3 everyday purchases, mostly on the card, some on checking.
-    const n = 1 + Math.floor(rand() * 3);
-    for (let i = 0; i < n; i++) {
-      const mi = Math.floor(rand() * merchantIds.length);
-      const amount = money(p.daily_spend.min + rand() * (p.daily_spend.max - p.daily_spend.min));
-      const account = rand() < 0.65 ? card : checking;
-      await api.create(`/accounts/${account}/purchases`, {
-        merchant_id: merchantIds[mi], medium: "balance", purchase_date: date, amount, description: p.merchants[mi].name,
-      });
-      counts.purchases++;
-    }
-
-    // Paycheck every N days, counted back from last_date.
-    const daysBack = Math.round((today.getTime() - d.getTime()) / 86_400_000);
-    if (daysBack % p.paycheck.every_days === 0) {
+    // Paychecks every everyDays, with the latest one lastPaidDaysAgo days ago.
+    if (daysAgo >= p.income.lastPaidDaysAgo && (daysAgo - p.income.lastPaidDaysAgo) % p.income.everyDays === 0) {
       await api.create(`/accounts/${checking}/deposits`, {
-        medium: "balance", transaction_date: date, amount: p.paycheck.amount, description: "Paycheck",
+        medium: "balance", transaction_date: date, amount: p.income.paycheckAmount, description: "Paycheck",
       });
-      counts.deposits++;
+      deposits++;
     }
 
-    // Monthly bills paid from checking on their day.
-    for (const b of p.bills) {
-      if (d.getUTCDate() === b.day_of_month) {
+    // Past bills, paid from checking on their day of the month.
+    const dom = new Date(`${date}T12:00:00Z`).getUTCDate();
+    for (const b of p.recurringBills) {
+      if (dom === b.dayOfMonth) {
         await api.create(`/accounts/${checking}/bills`, {
-          status: "completed", payee: b.payee, nickname: b.payee, payment_date: date, recurring_date: b.day_of_month, payment_amount: b.amount,
+          status: "completed", payee: b.label, nickname: b.id, payment_date: date, recurring_date: b.dayOfMonth, payment_amount: b.amount,
         });
-        counts.bills++;
-      }
-    }
-
-    // P2P transfers (to savings as a stand-in payee, since Nessie needs an account id).
-    for (const t of p.p2p) {
-      if (t.days_ago === daysBack) {
-        await api.create(`/accounts/${checking}/transfers`, {
-          medium: "balance", payee_id: savings, amount: t.amount, transaction_date: date, description: `P2P to ${t.payee}`,
-        });
-        counts.transfers++;
+        bills++;
       }
     }
   }
 
   // Upcoming bills as recurring, so the forecast can see them.
-  for (const b of p.bills) {
+  for (const b of p.recurringBills) {
     await api.create(`/accounts/${checking}/bills`, {
-      status: "recurring", payee: b.payee, nickname: b.payee, recurring_date: b.day_of_month, payment_amount: b.amount,
+      status: "recurring", payee: b.label, nickname: b.id, recurring_date: b.dayOfMonth, payment_amount: b.amount,
     });
   }
 
-  console.log("Seeded", { customerId, checking, savings, card, merchants: merchantIds.length, ...counts });
+  // Peers (Alex owes the user money) live in persona.json for the finance engine. Nessie has no
+  // external P2P payee, so nothing is posted for them.
+
+  const total = purchases.reduce((s, x) => s + x.amount, 0);
+  console.log("Seeded", {
+    customerId, checking, savings, card,
+    merchants: merchantIds.length,
+    purchases: purchases.length,
+    purchaseTotal: Math.round(total * 100) / 100,
+    avgPerDay: Math.round((total / days) * 100) / 100,
+    deposits, bills,
+  });
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

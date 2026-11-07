@@ -1,30 +1,39 @@
-// The parts of contracts/persona.json the seed script reads.
-// P1 owns persona.json. This is P4's assumption until P1's contract merges:
-// if P1's shape differs, adapt loadPersona() below, not the rest of the seed.
+// Loads contracts/persona.json (P1 owns it).
+// The type below mirrors P1's zod schema in contracts/src/persona.ts (PR #4), trimmed to the fields
+// the seed reads. TODO once #4 merges: replace with `import { Persona } from "@huddlr/contracts"`
+// and validate with `Persona.parse(...)`.
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export interface Persona {
-  customer: { first_name: string; last_name: string };
+  version: 1;
+  customer: { id: string; firstName: string; lastName: string };
   accounts: {
     checking: { balance: number };
     savings: { balance: number };
-    credit_card: { balance: number };
-    // Car loan and IRA are simulated by the finance engine, not stored in Nessie.
+    card: { balance: number };
+    // card limit/APR, carLoan, and ira are simulated by the finance engine, not stored in Nessie.
   };
-  paycheck: { amount: number; every_days: number; last_date: string };
-  bills: { payee: string; amount: number; day_of_month: number }[];
-  daily_spend: { min: number; max: number };
-  merchants: { name: string; category: string }[];
-  p2p: { payee: string; amount: number; days_ago: number }[];
-  history_days: number;
+  income: { paycheckAmount: number; everyDays: number; lastPaidDaysAgo: number };
+  recurringBills: { id: string; label: string; amount: number; dayOfMonth: number; essential: boolean }[];
+  spending: { averageDailyDiscretionary: number };
+  peers: { name: string; relationship: string; owesUser: number }[];
+  seedHints: {
+    historyDays: number;
+    merchants: { name: string; category: string; typicalAmount: [number, number]; perWeek: number }[];
+  };
 }
 
 const CONTRACT = fileURLToPath(new URL("../../contracts/persona.json", import.meta.url));
-const EXAMPLE = fileURLToPath(new URL("./persona.example.json", import.meta.url));
+// Copy of P1's persona.json from PR #4, used only until that PR merges. Delete it afterwards.
+const FALLBACK = fileURLToPath(new URL("./persona.example.json", import.meta.url));
 
 export function loadPersona(): Persona {
-  if (existsSync(CONTRACT)) return JSON.parse(readFileSync(CONTRACT, "utf8")) as Persona;
-  console.warn("contracts/persona.json not found yet, using seed/persona.example.json");
-  return JSON.parse(readFileSync(EXAMPLE, "utf8")) as Persona;
+  const path = existsSync(CONTRACT) ? CONTRACT : FALLBACK;
+  if (path === FALLBACK) console.warn("contracts/persona.json not found yet, using seed/persona.example.json");
+  const p = JSON.parse(readFileSync(path, "utf8")) as Persona;
+  if (p.version !== 1 || !p.seedHints?.merchants?.length || !p.income || !p.recurringBills) {
+    throw new Error(`${path} does not match the persona contract (version 1)`);
+  }
+  return p;
 }
