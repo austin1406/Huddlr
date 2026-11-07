@@ -15,7 +15,7 @@ Owner: Rishi Vallabhaneni (@rishivallabhaneni), P4
 
 ```bash
 npm install
-npm run dev            # http://localhost:8790
+npm run dev            # http://localhost:6000
 npm test               # typecheck + unit tests
 npm run agent-config   # prints the ElevenLabs prompt, tools, and webhook URLs (contains the secret, don't commit)
 ```
