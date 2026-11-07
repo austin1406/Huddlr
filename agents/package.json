@@ -1,0 +1,10 @@
+{
+  "name": "huddlr-agents",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "card": "node --env-file-if-exists=../.env src/card-demo.js"
+  },
+  "engines": { "node": ">=22" }
+}
