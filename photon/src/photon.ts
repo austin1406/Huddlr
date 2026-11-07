@@ -44,7 +44,7 @@ export async function sendImage(t: Target, bytes: Uint8Array, contentType: strin
     path: { id: env.projectId() },
     headers: {
       "content-length": String(body.size),
-      "content-type": `multipart/related; boundary=${boundary}; type="application/json"`,
+      "content-type": `multipart/related; boundary=${boundary}`,
       "idempotency-key": `${idempotencyKey}:upload`,
     },
     body,
