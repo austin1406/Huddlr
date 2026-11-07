@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and builds
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+coverage/
+
+# Python (in case a helper uses it)
+.venv/
+__pycache__/
+
+# Logs and local files
+*.log
+*.local
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/

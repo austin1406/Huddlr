@@ -1,0 +1,7 @@
+# Keep line endings identical on Windows and Mac so diffs and merges stay clean.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary

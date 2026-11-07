@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: No .env files committed
+        run: |
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$'; then
+            echo "Do not commit .env files"
+            exit 1
+          fi
+
+      - name: Test each package
+        run: |
+          for dir in contracts finance agents photon dashboard voice scripts; do
+            if [ -f "$dir/package.json" ]; then
+              echo "== $dir =="
+              (cd "$dir" && npm install --no-audit --no-fund && npm test --if-present)
+            fi
+          done
