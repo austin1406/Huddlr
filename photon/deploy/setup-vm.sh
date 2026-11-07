@@ -37,6 +37,7 @@ if [ -d "$APP/.git" ]; then git -C "$APP" pull --ff-only; else git clone "$REPO"
 
 echo "==> Caddy routes"
 sed "s/__DOMAIN__/$DOMAIN/" "$APP/photon/deploy/Caddyfile" > /etc/caddy/Caddyfile
+caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
 systemctl reload caddy || systemctl restart caddy
 
 echo "==> Photon service"
