@@ -59,6 +59,14 @@ Reply using IDs from **that person's own** inbound message:
 - optional `parentMessageId` = inbound `id` → shows as a threaded reply
 - `idempotency-key` header: stable per logical message (outbox row id), so retries never double-send
 
+## Sending an image
+
+`uploadAttachment` requires `Content-Type: multipart/related; boundary=...` (no other parameters) with exactly two parts:
+1. `application/json`: `{ "contentType": "image/png", "sizeBytes": <exact byte length>, "filename": "card.png" }`
+2. the file bytes
+
+Then send `content: { "type": "attachment", "attachmentId": "<id from upload>" }`. `sendImage` in `photon/src/photon.ts` does all of this.
+
 ## What works (tested on a real iPhone)
 
 | Feature | Result |
@@ -67,7 +75,7 @@ Reply using IDs from **that person's own** inbound message:
 | Text reply out | ✅ delivered, threaded under the user's message |
 | Typing indicator (`setSpaceTyping`) | ✅ accepted and shown |
 | Photo in | ✅ arrives as `attachment` content with an attachment id |
-| Image out (upload → attachment) | ⏳ testing |
+| Image out (upload → attachment) | ✅ via `sendImage` |
 | Tapbacks, polls, effects, voice notes | ❌ not on Beta iMessage (docs) |
 | Group chats | ❌ shared lines are direct-only |
 
