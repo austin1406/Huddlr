@@ -146,6 +146,27 @@ main{max-width:1160px;margin:0 auto;padding:28px 24px 64px}
 .text{display:block;text-align:center;margin-top:18px;background:var(--accent);color:var(--accent-ink);text-decoration:none;padding:13px;border-radius:12px;font-weight:700}
 .x{float:right;width:34px;height:34px;border-radius:50%;border:0;background:var(--page);font-size:20px;line-height:1;color:var(--muted);cursor:pointer}
 .loading{padding:80px 0;text-align:center;color:var(--muted)}
+.bar .right{display:flex;align-items:center;gap:14px}
+.lock{border:1px solid var(--hair);background:var(--surface);border-radius:999px;padding:5px 12px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--muted)}
+.lock:hover{color:var(--ink)}
+
+/* sign in */
+.gate{min-height:calc(100vh - 120px);display:grid;place-items:center}
+.gate .card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--hair);border-radius:24px;box-shadow:var(--lift);padding:32px 28px;text-align:center}
+.gate .mark{width:72px;height:72px;margin:0 auto 18px;border-radius:50%;padding:6px;background:conic-gradient(var(--have) 0 38%,var(--owe) 38% 100%)}
+.gate .mark div{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 30%,var(--table-hi),var(--table) 70%);display:grid;place-items:center}
+.gate .mark svg{width:26px;height:26px}
+.gate h1{font-size:24px;font-weight:800;letter-spacing:-.02em;margin:0 0 8px}
+.gate p{margin:0;color:var(--muted);font-size:15px}
+.code{display:block;width:100%;margin:22px 0 12px;text-align:center;font-size:30px;font-weight:800;letter-spacing:.4em;padding:14px 0 14px .4em;
+  border:1px solid var(--hair);border-radius:14px;background:var(--page);font-variant-numeric:tabular-nums}
+.code:focus{outline:none;box-shadow:var(--focus);border-color:var(--accent)}
+.unlock{width:100%;border:0;border-radius:12px;padding:14px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:16px;cursor:pointer}
+.unlock:disabled{opacity:.6}
+.resend{margin-top:14px;background:none;border:0;color:var(--accent);font-weight:600;cursor:pointer;font-size:14.5px}
+.resend:disabled{color:var(--muted);cursor:default}
+.gate .err-line{margin:0 0 10px}
+.gate .fine{margin-top:20px;font-size:13px}
 </style>
 </head>
 <body>
@@ -155,6 +176,7 @@ main{max-width:1160px;margin:0 auto;padding:28px 24px 64px}
 <script>
 const API = location.pathname.replace(/\/$/, "") + "/api";
 let data = null, result = null, busy = false, question = "", notice = "";
+let login = null; // { hint, error, sending, wait } while signing in
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -325,7 +347,7 @@ function render() {
   $("#app").innerHTML = `
     <header class="bar">
       <h1>${esc(h.firstName ? h.firstName + "'s money, at one table" : "Your money, at one table")}</h1>
-      <span class="asof">As of ${esc(day(h.localDate))}</span>
+      <span class="right"><span class="asof">As of ${esc(day(h.localDate))}</span><button class="lock" id="lock">Lock</button></span>
     </header>
     <div class="hero">
       <div>
@@ -377,6 +399,7 @@ async function ask(text) {
   try {
     const r = await fetch(API + "/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: question }) });
     const j = await r.json().catch(() => ({}));
+    if (r.status === 401) { busy = false; return needLogin(j.hint || ""); }
     if (!r.ok) notice = j.error || "That didn't go through. Try again.";
     else if (!j.understood) notice = "Include an amount so the table can work it out, like “buy a $300 TV” or “move $200 to savings”.";
     else result = j.result;
@@ -396,10 +419,83 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet
 document.addEventListener("input", (e) => { if (e.target.id === "q") question = e.target.value; });
 document.addEventListener("submit", (e) => { if (e.target.id === "ask") { e.preventDefault(); ask($("#q").value); } });
 
+/* ---------- sign in: a code texted to the same iMessage chat ---------- */
+const AUTH = location.pathname.replace(/\/$/, "") + "/auth";
+const LOCK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="#f3f6fb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`;
+function renderLogin() {
+  const L = login;
+  $("#app").innerHTML = `<div class="gate"><form class="card" id="unlock" autocomplete="on">
+      <div class="mark"><div>${LOCK_ICON}</div></div>
+      <h1>Verify it's you</h1>
+      <p>${L.sent ? `We texted a 6-digit code to your Huddlr chat (phone ${esc(L.hint)}).` : "We'll text a 6-digit code to your Huddlr chat."}</p>
+      <input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" placeholder="••••••" aria-label="6-digit code" value="${esc(L.typed || "")}">
+      ${L.error ? `<p class="err-line">${esc(L.error)}</p>` : ""}
+      <button class="unlock" ${L.busy ? "disabled" : ""}>${L.busy ? "Checking…" : "Unlock"}</button>
+      <button type="button" class="resend" id="resend" ${L.wait > 0 || L.sending ? "disabled" : ""}>${L.sending ? "Sending…" : L.wait > 0 ? `Send a new code in ${L.wait}s` : L.sent ? "Send a new code" : "Text me a code"}</button>
+      <p class="fine">You'll stay signed in on this device for 24 hours.</p>
+    </form></div>`;
+  $("#code").focus();
+}
+let tick;
+function countdown(seconds) {
+  login.wait = seconds;
+  clearInterval(tick);
+  tick = setInterval(() => {
+    if (!login) return clearInterval(tick);
+    login.wait = Math.max(0, login.wait - 1);
+    const b = $("#resend");
+    if (b) { b.disabled = login.wait > 0; b.textContent = login.wait > 0 ? `Send a new code in ${login.wait}s` : "Send a new code"; }
+    if (!login.wait) clearInterval(tick);
+  }, 1000);
+}
+async function sendCode() {
+  login.sending = true; login.error = ""; renderLogin();
+  try {
+    const r = await fetch(AUTH + "/send", { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    login.sending = false;
+    if (r.ok) { login.sent = true; login.hint = j.hint || login.hint; countdown(j.resendInSeconds || 30); }
+    else if (r.status === 404) return expiredView();
+    else { login.error = j.error || "Couldn't send a code. Try again."; if (j.retryInSeconds) { login.sent = true; countdown(Math.min(j.retryInSeconds, 3600)); } }
+  } catch { login.sending = false; login.error = "Couldn't reach the server. Check your connection."; }
+  renderLogin();
+}
+async function verify() {
+  const code = ($("#code").value || "").replace(/\D/g, "");
+  login.typed = code;
+  if (code.length !== 6) { login.error = "Enter all 6 digits."; return renderLogin(); }
+  login.busy = true; login.error = ""; renderLogin();
+  try {
+    const r = await fetch(AUTH + "/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) });
+    const j = await r.json().catch(() => ({}));
+    login.busy = false;
+    if (r.ok) { login = null; clearInterval(tick); $("#app").innerHTML = `<div class="loading">Setting the table…</div>`; return load(); }
+    if (r.status === 404) return expiredView();
+    login.error = j.error || "That code didn't work."; login.typed = "";
+  } catch { login.busy = false; login.error = "Couldn't reach the server. Check your connection."; }
+  renderLogin();
+}
+function needLogin(hint, autoSend = true) {
+  if (login) return;
+  data = null; result = null; closeSheet();
+  login = { hint, sent: false, wait: 0 };
+  renderLogin();
+  if (autoSend) sendCode(); // send right away; this only runs in a real browser, never in link previews
+}
+const expiredView = () => { login = null; $("#app").innerHTML = `<div class="loading"><h2>This link has expired</h2>Text “huddle link” to get a new one.</div>`; };
+document.addEventListener("submit", (e) => { if (e.target.id === "unlock") { e.preventDefault(); verify(); } });
+document.addEventListener("input", (e) => { if (e.target.id === "code") { const v = e.target.value.replace(/\D/g, "").slice(0, 6); e.target.value = v; if (v.length === 6) verify(); } });
+document.addEventListener("click", async (e) => {
+  if (e.target.id === "resend") sendCode();
+  if (e.target.id === "lock") { await fetch(AUTH + "/lock", { method: "POST" }).catch(() => {}); data = null; login = null; needLogin("", false); }
+});
+
 async function load() {
+  if (login) return;
   try {
     const r = await fetch(API);
-    if (r.status === 404) { $("#app").innerHTML = `<div class="loading"><h2>This link has expired</h2>Text “how am I doing?” to get a new one.</div>`; return; }
+    if (r.status === 404) return expiredView();
+    if (r.status === 401) return needLogin((await r.json().catch(() => ({}))).hint || "");
     data = await r.json();
     if (!$("#scrim").classList.contains("on") && !result && !busy && document.activeElement?.id !== "q") render();
   } catch { if (!data) $("#app").innerHTML = `<div class="loading">Can't load your table right now. Refresh to try again.</div>`; }

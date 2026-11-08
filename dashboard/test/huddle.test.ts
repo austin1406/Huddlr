@@ -76,7 +76,7 @@ test("status rule matches the contract", () => {
 
 test("private links verify, expire, and reject tampering", () => {
   const t = signLink("s3cret", "+15550001111", 60, 1_000_000);
-  assert.deepEqual(verifyLink("s3cret", t, 1_000_000), { phone: "+15550001111" });
+  assert.deepEqual(verifyLink("s3cret", t, 1_000_000), { phone: "+15550001111", issuedAt: 1000 });
   assert.equal(verifyLink("s3cret", t, 1_000_000 + 61_000), null);
   assert.equal(verifyLink("other", t, 1_000_000), null);
   const [p, s] = t.split(".");

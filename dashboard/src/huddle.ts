@@ -633,14 +633,15 @@ export async function understand(
 }
 
 // ---------- private links ----------
-/** A link that opens one person's huddle without the dashboard password. Expires (default 7 days). */
-export function signLink(secret: string, phone: string, ttlSeconds = 7 * 86400, nowMs = Date.now()): string {
-  const payload = Buffer.from(JSON.stringify({ p: phone, e: Math.floor(nowMs / 1000) + ttlSeconds })).toString("base64url");
+/** A link to one person's huddle. Expires (default 24 hours); opening it still needs a code texted to that phone. */
+export function signLink(secret: string, phone: string, ttlSeconds = 86400, nowMs = Date.now()): string {
+  const iat = Math.floor(nowMs / 1000);
+  const payload = Buffer.from(JSON.stringify({ p: phone, i: iat, e: iat + ttlSeconds })).toString("base64url");
   const sig = createHmac("sha256", secret).update(`huddle:${payload}`).digest("base64url").slice(0, 32);
   return `${payload}.${sig}`;
 }
 
-export function verifyLink(secret: string, token: string, nowMs = Date.now()): { phone: string } | null {
+export function verifyLink(secret: string, token: string, nowMs = Date.now()): { phone: string; issuedAt: number } | null {
   if (!secret || typeof token !== "string" || token.length > 400) return null;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
@@ -649,9 +650,9 @@ export function verifyLink(secret: string, token: string, nowMs = Date.now()): {
   const b = Buffer.from(want);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
-    const { p, e } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const { p, e, i } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (typeof p !== "string" || typeof e !== "number" || e * 1000 < nowMs) return null;
-    return { phone: p };
+    return { phone: p, issuedAt: typeof i === "number" ? i : 0 };
   } catch {
     return null;
   }

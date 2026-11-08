@@ -55,17 +55,30 @@ built from P1's numbers (no AI, so every number is exact). Under the table: your
 - **Tap a person** for their details, what's coming up, and a "Text them" button that opens iMessage to the agent number.
 - **Next 6 weeks**: Checking's forecast with paydays and bills marked by who they belong to.
 
-The link is private and expires (7 days by default). No dashboard password needed: the token is signed with `HUDDLR_SECRET`.
+### Signing in
+
+Getting in needs **the link and the phone**:
+
+1. The link is signed with `HUDDLR_SECRET`, names one phone, and expires after 24 hours.
+   Asking for a new link (`POST /me-link`) cancels that phone's older links, so a forwarded one stops working.
+2. Opening it shows "Verify it's you" and texts a 6-digit code into the same iMessage chat (outbox, speaker
+   `system`, priority 2 so it jumps the queue). Codes last 10 minutes, work once, allow 5 tries, and at most
+   5 can be sent an hour (30 seconds apart).
+3. The right code gives that browser a 24-hour session (httpOnly cookie on `/me`; only a hash is stored).
+   **Lock** in the header signs out. The team dashboard masks codes as `••••••`.
+
+Tables (created on start): `p3_huddle_codes`, `p3_huddle_sessions`, `p3_huddle_links`.
+Without `DATABASE_URL` (local preview) an in-memory store is used and codes are printed to the log instead of texted.
 
 Get a link:
 
 ```bash
-# on the server
-cd /opt/huddlr/dashboard && npm run link              # for DEMO_USER_PHONE
-npm run link -- +15551234567 24                       # another phone, valid 24 hours
+# on the server (does not cancel older links)
+cd /opt/huddlr/dashboard && npm run link              # for DEMO_USER_PHONE, 24 hours
+npm run link -- +15551234567 48                       # another phone, 48 hours
 ```
 
-From code (P2, when someone texts "how am I doing?"):
+From code (P2: in the welcome text, and when the user asks for the link):
 
 ```
 POST http://localhost:3001/me-link
@@ -73,4 +86,4 @@ x-huddlr-secret: <HUDDLR_SECRET>
 { "phone": "+15551234567" }          ->  { "url": "https://…/me/…" }
 ```
 
-On the dashboard, the **open Huddle ↗** chip in the header opens it for the demo user.
+On the dashboard, the **open Huddle ↗** chip opens the demo user's Huddle already signed in (the team is logged in there), without cancelling the phone's link.

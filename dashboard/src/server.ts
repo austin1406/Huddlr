@@ -5,9 +5,11 @@ import { timingSafeEqual } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import pg from "pg";
 import { loadChat, loadFacts, loadOutboxStats, loadProposals, maskPhone, type Db } from "./state.js";
 import { loadSim, runControl, type ControlDeps } from "./control.js";
+import { cancelOlderLinks, checkCode, endSession, linksValidFrom, migrateAuth, newCode, newSession, queueCode, sessionPhone, SESSION_TTL_MS } from "./auth.js";
 import { buildHuddle, decide, parseDecision, signLink, understand, verifyLink, type Decision } from "./huddle.js";
 
 config({ path: fileURLToPath(new URL("../../.env", import.meta.url)), quiet: true });
@@ -36,19 +38,94 @@ const app = new Hono();
 
 app.get("/dashboard/health", (c) => c.json({ ok: true, db: !!db, auth: !!env.password }));
 
-// ---------- The Huddle: the user's own page, opened from a private link (no dashboard password) ----------
-const linkFor = (phone: string, ttlHours = 168) => `${env.publicUrl}/me/${signLink(env.secret, phone, ttlHours * 3600)}`;
+// ---------- The Huddle: the user's own page. Link + a code texted to their phone (see auth.ts). ----------
+const linkFor = (phone: string, ttlHours = 24) => `${env.publicUrl}/me/${signLink(env.secret, phone, ttlHours * 3600)}`;
+const COOKIE = "huddle_session";
 const expired = (c: any) =>
-  c.html(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>Link expired</title><body style="font-family:system-ui;padding:40px 20px;text-align:center"><h2>This link has expired</h2><p>Text "how am I doing?" to get a new one.</p>`, 404);
+  c.html(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>Link expired</title><body style="font-family:system-ui;padding:48px 20px;text-align:center;color:#132039"><h2>This link has expired</h2><p>Text “huddle link” to get a new one.</p>`, 404);
 
-app.get("/me/:token", (c) => (verifyLink(env.secret, c.req.param("token")) ? c.html(huddlePage()) : expired(c)));
+// Login data lives in Postgres. Without DATABASE_URL (local preview) an in-memory PGlite stands in and codes print to the log.
+const authDb: Promise<Db> = (async () => {
+  if (db) {
+    await migrateAuth(db);
+    return db;
+  }
+  const { PGlite } = await import("@electric-sql/pglite");
+  const mem = new PGlite();
+  await mem.exec(readFileSync(fileURLToPath(new URL("../../contracts/p2_agents.sql", import.meta.url)), "utf8"));
+  await migrateAuth(mem as unknown as Db);
+  return mem as unknown as Db;
+})();
+authDb.catch((e) => console.error("[huddle] auth store unavailable:", e.message));
+
+/** The phone this link is for, if the link is current (not expired, not replaced by a newer one). */
+async function linkPhone(token: string): Promise<string | null> {
+  const who = verifyLink(env.secret, token);
+  if (!who) return null;
+  return who.issuedAt >= (await linksValidFrom(await authDb, who.phone)) ? who.phone : null;
+}
+
+/** Link is current AND this browser logged in with the code for that same phone. */
+async function gate(c: any): Promise<{ phone: string } | Response> {
+  const phone = await linkPhone(c.req.param("token"));
+  if (!phone) return c.json({ error: "expired" }, 404);
+  if ((await sessionPhone(await authDb, env.secret, getCookie(c, COOKIE))) !== phone) return c.json({ login: true, hint: maskPhone(phone) }, 401);
+  return { phone };
+}
+
+function startSession(c: any, token: string) {
+  const https = c.req.header("x-forwarded-proto") === "https" || env.publicUrl.startsWith("https");
+  setCookie(c, COOKIE, token, { path: "/me", httpOnly: true, secure: https, sameSite: "Lax", maxAge: SESSION_TTL_MS / 1000 });
+}
+
+app.get("/me/:token", async (c) => ((await linkPhone(c.req.param("token"))) ? c.html(huddlePage()) : expired(c)));
+
+app.post("/me/:token/auth/send", async (c) => {
+  const phone = await linkPhone(c.req.param("token"));
+  if (!phone) return c.json({ error: "expired" }, 404);
+  const adb = await authDb;
+  const r = await newCode(adb, env.secret, phone);
+  if (!r.ok)
+    return c.json(
+      { error: r.reason === "wait" ? `A code was just sent. You can ask for another in ${r.retryInSeconds} seconds.` : "Too many codes this hour. Try again later.", retryInSeconds: r.retryInSeconds },
+      429,
+    );
+  await queueCode(adb, phone, r.code);
+  if (!db) console.log(`[huddle] code for ${maskPhone(phone)}: ${r.code} (no database, so it was not texted)`);
+  return c.json({ ok: true, hint: maskPhone(phone), resendInSeconds: 30 });
+});
+
+app.post("/me/:token/auth/verify", async (c) => {
+  const phone = await linkPhone(c.req.param("token"));
+  if (!phone) return c.json({ error: "expired" }, 404);
+  const body = await c.req.json().catch(() => ({}));
+  const adb = await authDb;
+  const r = await checkCode(adb, env.secret, phone, String(body.code ?? ""));
+  if (r === "ok") {
+    startSession(c, await newSession(adb, env.secret, phone));
+    return c.json({ ok: true });
+  }
+  const msg = {
+    wrong: "That code doesn't match. Check the latest text and try again.",
+    expired: "That code has expired. Send a new one.",
+    too_many: "Too many wrong tries. Send a new code.",
+    none: "Send a code first.",
+  }[r];
+  return c.json({ error: msg, reason: r }, 401);
+});
+
+app.post("/me/:token/auth/lock", async (c) => {
+  await endSession(await authDb, env.secret, getCookie(c, COOKIE));
+  deleteCookie(c, COOKIE, { path: "/me" });
+  return c.json({ ok: true });
+});
 
 app.get("/me/:token/api", async (c) => {
-  const who = verifyLink(env.secret, c.req.param("token"));
-  if (!who) return c.json({ error: "expired" }, 404);
+  const g = await gate(c);
+  if (g instanceof Response) return g;
   const { facts, source } = await loadFacts(env.financeUrl, env.secret, env.fixture);
   const agent = db
-    ? await db.query<{ agent_handle: string | null }>(`SELECT agent_handle FROM p3_photon_spaces WHERE user_phone = $1`, [who.phone]).catch(() => ({ rows: [] }))
+    ? await db.query<{ agent_handle: string | null }>(`SELECT agent_handle FROM p3_photon_spaces WHERE user_phone = $1`, [g.phone]).catch(() => ({ rows: [] }))
     : { rows: [] };
   return c.json({ huddle: buildHuddle(facts, cast), source, agentHandle: agent.rows[0]?.agent_handle ?? null });
 });
@@ -66,7 +143,8 @@ const whatIf = async (scenario: unknown) => {
 };
 
 app.post("/me/:token/api/decide", async (c) => {
-  if (!verifyLink(env.secret, c.req.param("token"))) return c.json({ error: "expired" }, 404);
+  const g = await gate(c);
+  if (g instanceof Response) return g;
   const d = parseDecision(await c.req.json().catch(() => null));
   if (!d) return c.json({ error: "bad decision" }, 400);
   const { facts } = await loadFacts(env.financeUrl, env.secret, env.fixture);
@@ -105,7 +183,8 @@ function tooMany(token: string): boolean {
 
 app.post("/me/:token/api/ask", async (c) => {
   const token = c.req.param("token");
-  if (!verifyLink(env.secret, token)) return c.json({ error: "expired" }, 404);
+  const g = await gate(c);
+  if (g instanceof Response) return g;
   if (tooMany(token)) return c.json({ error: "Too many questions at once. Try again in a minute." }, 429);
   const body = await c.req.json().catch(() => ({}));
   const text = typeof body.text === "string" ? body.text.trim().slice(0, 300) : "";
@@ -117,13 +196,15 @@ app.post("/me/:token/api/ask", async (c) => {
   return c.json({ understood: true, by, decision: decision as Decision, result: await decide(facts, decision, whatIf) });
 });
 
-// For the agents service (P2): mint a link to send when the user asks "how am I doing?".
+// For the agents service (P2): a fresh link for the welcome text or when the user asks for it.
+// A new link cancels that phone's older links (so a forwarded one stops working).
 app.post("/me-link", async (c) => {
   if (!sameSecret(c.req.header("x-huddlr-secret"), env.secret)) return c.json({ error: "unauthorized" }, 401);
   const body = await c.req.json().catch(() => ({}));
   const phone = typeof body.phone === "string" && body.phone ? body.phone : env.demoPhone;
   if (!phone) return c.json({ error: "phone required" }, 400);
-  return c.json({ url: linkFor(phone, Number(body.ttlHours) > 0 ? Number(body.ttlHours) : 168) });
+  if (body.cancelOlder !== false) await cancelOlderLinks(await authDb, phone);
+  return c.json({ url: linkFor(phone, Number(body.ttlHours) > 0 ? Number(body.ttlHours) : 24) });
 });
 
 // The dashboard shows real phone conversations, so lock it when a password is set (user: huddlr).
@@ -143,10 +224,13 @@ app.get("/api/state", async (c) => {
   return c.json({ facts, source, chat, outbox, proposals, sim: sim?.sim ?? null, user: env.demoPhone ? maskPhone(env.demoPhone) : null });
 });
 
-// Behind the dashboard login: a fresh Huddle link for the demo user (for the "Open Huddle" button).
-app.get("/api/huddle-link", (c) =>
-  env.secret && env.demoPhone ? c.json({ url: linkFor(env.demoPhone) }) : c.json({ error: "HUDDLR_SECRET and DEMO_USER_PHONE needed" }, 400),
-);
+// Behind the dashboard login: open the demo user's Huddle already signed in (the team is logged in here).
+// Does not cancel the phone's link, so the presenter's phone keeps working.
+app.get("/api/huddle-open", async (c) => {
+  if (!env.secret || !env.demoPhone) return c.text("HUDDLR_SECRET and DEMO_USER_PHONE are needed", 400);
+  startSession(c, await newSession(await authDb, env.secret, env.demoPhone));
+  return c.redirect(linkFor(env.demoPhone).replace(env.publicUrl, ""));
+});
 
 // Demo controller. Same login as the dashboard; calls finance/agents on localhost with the shared secret.
 app.post("/api/control/:action", async (c) => {
