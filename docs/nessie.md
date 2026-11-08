@@ -28,7 +28,7 @@ Validation is strict (extra fields are rejected). Required fields:
 | Deposit | `medium`, `transaction_date`, `status`, `amount`, `description` |
 | Withdrawal | `medium`, `amount` (optional `transaction_date`, `status`, `description`) |
 | Transfer `POST /accounts/{from}/transfers` | `transaction_date`, `status`, `amount`, `description` **only**. `medium`, `payee`, `payee_id`, `to_account_id` and similar are all rejected, and none of them work as query parameters either. |
-| Bill | `status`, `payee`, `payment_amount`; optional `nickname`, `payment_date`, `recurring_date`. `creation_date` is rejected (the server sets it). |
+| Bill | `status`, `payee`, `payment_amount`, and **always `payment_date`** (see traps); optional `nickname`, `recurring_date`. `creation_date` is rejected (the server sets it). |
 
 ## Answers to the spike questions
 
@@ -40,6 +40,8 @@ Validation is strict (extra fields are rejected). Required fields:
 ## Traps
 
 - **A purchase created without `status` poisons the list.** It is stored, but `GET /accounts/{id}/purchases` then fails with `400 ... Purchase status field required` for that whole account. Individual purchases cannot be deleted (no route). Always send `status: "completed"`.
+- **Nessie stores whole dollars.** Found by Rishi when seeding: a balance of 1186.50 came back as 1186, and cents on purchases are dropped. Amounts sent to Nessie must be whole dollars. The finance ledger keeps cents itself, so a $142.37 purchase is exact in the engine and rounded in Nessie. The golden test compares totals built from whole-dollar data.
+- **A bill without `payment_date` poisons the bill list**, the same way a purchase without `status` poisons purchases: stored, then `GET /accounts/{id}/bills` fails with `400 ... payment_date field required` for the whole account. Always send `payment_date` (also with `status: recurring`). `recurring_date` is the day of month.
 - **No per-id delete** for purchases, withdrawals, merchants or customers. Per-id delete works for deposits, transfers, bills and accounts. A bulk `DELETE /data?type=...` exists in the seed client (not tested here).
 - Creating an account does not link anything else; an account's purchase list needs a real `merchant_id`, so create merchants first.
 
@@ -64,4 +66,5 @@ The finance engine already runs on an in-process ledger (`finance/src/engine/led
 - Default base URL is `http://api.nessieisreal.com`, which times out. Use https.
 - Purchases are sent **without `status`**, which breaks the purchase list for the account. Add `status: "completed"`.
 - Deposits are sent without `status`, which is rejected (400). Add `status: "completed"`.
-- Bills are fine. Customers should keep sending a name and address.
+- Bills need a `payment_date` (fixed in PR #37), and amounts must be whole dollars (fixed in PR #37). Customers should keep sending a name and address.
+- Reseeding needs `seed:reset` (bulk delete on the shared key). Safe while the finance engine does not read Nessie yet; after NessieSource is switched on, resetting changes data under it, so reset first and sync after.
