@@ -140,6 +140,21 @@ export function parsePostCall(payload: PostCallPayload, fallbackPhone: string): 
 }
 
 /**
+ * A number is grounded if a tool returned it, or it's a whole-dollar rounding of one
+ * ("$437" for 437.5, the way the agent says it out loud).
+ */
+export function isGrounded(n: string, grounded: Set<string>): boolean {
+  if (grounded.has(n)) return true;
+  const x = Number(n);
+  if (!Number.isInteger(x)) return false;
+  for (const g of grounded) {
+    const v = Number(g);
+    if (Number.isFinite(v) && !Number.isInteger(v) && (Math.floor(v) === x || Math.round(v) === x)) return true;
+  }
+  return false;
+}
+
+/**
  * The recap text for iMessage. The LLM summary is only used if every number in it appeared in a
  * tool result during the call (the "every number comes from code" rule). Otherwise a template.
  */
@@ -148,7 +163,7 @@ export function buildRecap(call: ParsedCall): { text: string; usedSummary: boole
     ? ` You said yes to the plan, so I've marked it accepted. The transfer is yours to make in your bank.`
     : "";
   const numbers = call.summary.match(NUMBER_RE) ?? [];
-  const grounded = numbers.every((n) => call.groundedNumbers.has(normalizeNumber(n)));
+  const grounded = numbers.every((n) => isGrounded(normalizeNumber(n), call.groundedNumbers));
   if (call.summary && grounded) {
     return { text: `📞 Call recap: ${call.summary}${decided}`, usedSummary: true };
   }

@@ -144,6 +144,27 @@ test("setup: agent body references secrets by id, never by value", async () => {
     assert.ok(v in DYNAMIC_PLACEHOLDERS, v);
   }
   const p = phoneBody({ phoneNumber: "+18286472114", agentId: "ag", sipUser: "prj", sipPassword: "pw" });
-  assert.equal(p.outbound_trunk_config.address, "sip.spectrum.photon.codes");
+  assert.equal(p.outbound_trunk_config.address, "sip.photon.codes");
   assert.equal(p.outbound_trunk_config.transport, "tls");
+});
+
+test("every tool field has a description (ElevenLabs rejects fields without one)", () => {
+  const walk = (schema: { properties?: Record<string, any> }, path: string): string[] =>
+    Object.entries(schema.properties ?? {}).flatMap(([k, v]) => [
+      ...(v.description ? [] : [`${path}.${k}`]),
+      ...(v.type === "object" ? walk(v, `${path}.${k}`) : []),
+    ]);
+  const missing = buildTools("https://x", "s").flatMap((t) => walk(t.api_schema.request_body_schema as any, t.name));
+  assert.deepEqual(missing, []);
+});
+
+test("recap accepts whole-dollar rounding of a tool number, not made-up ones", async () => {
+  const { isGrounded } = await import("../src/postCall");
+  const g = new Set(["437.5", "40", "1186.5"]);
+  assert.ok(isGrounded("437", g));
+  assert.ok(isGrounded("438", g));
+  assert.ok(isGrounded("40", g));
+  assert.ok(isGrounded("1186", g));
+  assert.ok(!isGrounded("500", g));
+  assert.ok(!isGrounded("437.25", g));
 });

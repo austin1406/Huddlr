@@ -33,12 +33,16 @@ const TOOL_SPECS: Record<ToolName, { description: string; body: JsonSchema }> = 
           description:
             "purchase_now: amount. lose_income: months. one_time_expense: amount and date (YYYY-MM-DD). new_recurring: amount, dayOfMonth (1-28), label.",
           properties: {
-            type: { type: "string", enum: ["purchase_now", "lose_income", "one_time_expense", "new_recurring"] },
+            type: {
+              type: "string",
+              enum: ["purchase_now", "lose_income", "one_time_expense", "new_recurring"],
+              description: "Which scenario to simulate",
+            },
             amount: { type: "number", description: "Dollars" },
             months: { type: "integer", description: "lose_income only" },
             date: { type: "string", description: "one_time_expense only, YYYY-MM-DD" },
             dayOfMonth: { type: "integer", description: "new_recurring only, 1-28" },
-            label: { type: "string" },
+            label: { type: "string", description: "What it's for, e.g. headphones or gym membership" },
           },
           required: ["type"],
         },
@@ -52,7 +56,7 @@ const TOOL_SPECS: Record<ToolName, { description: string; body: JsonSchema }> = 
       type: "object",
       properties: {
         amount: { type: "number", description: "Dollars to allocate" },
-        source: { type: "string", enum: ["bonus", "surplus", "other"] },
+        source: { type: "string", enum: ["bonus", "surplus", "other"], description: "Where the money came from" },
       },
       required: ["amount"],
     },
@@ -67,7 +71,7 @@ const TOOL_SPECS: Record<ToolName, { description: string; body: JsonSchema }> = 
       type: "object",
       properties: {
         proposalId: { type: "string", description: "id from get_pending_proposal" },
-        via: { type: "string", enum: ["voice"] },
+        via: { type: "string", enum: ["voice"], description: "Always the string voice" },
       },
       required: ["proposalId", "via"],
     },

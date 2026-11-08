@@ -16,11 +16,14 @@ import { env } from "./env";
 
 const API = "https://api.elevenlabs.io";
 const ENV_PATH = fileURLToPath(new URL("../../.env", import.meta.url));
-const PHOTON_SIP_HOST = "sip.spectrum.photon.codes";
+// From Photon > Voice > Default profile > Outbound calls > SIP connection (the docs' spectrum host is older).
+const PHOTON_SIP_HOST = process.env.PHOTON_SIP_HOST || "sip.photon.codes";
 
 const args = new Set(process.argv.slice(2));
 const DRY = args.has("--dry-run");
 const UPDATE = args.has("--update");
+/** Re-point the existing ElevenLabs number at Photon with the current SIP credential. */
+const UPDATE_NUMBER = args.has("--update-number");
 
 /** Placeholders so the agent works in the ElevenLabs test console, before any webhook fills them. */
 export const DYNAMIC_PLACEHOLDERS: Record<string, string> = {
@@ -103,17 +106,36 @@ async function main() {
   const apiKey = env.elevenLabsApiKey;
   const base = env.publicBaseUrl;
   const phoneNumber = process.env.VOICE_PHONE_NUMBER || "";
-  const sipUser = process.env.PHOTON_PROJECT_ID || "";
-  const sipPassword = process.env.PHOTON_PROJECT_SECRET || "";
+  // Photon > Voice > Default profile > Outbound calls shows the SIP username and a generated password.
+  const sipUser = process.env.PHOTON_SIP_USERNAME || "";
+  const sipPassword = process.env.PHOTON_SIP_PASSWORD || "";
   const secrets = [apiKey, env.huddlrSecret, sipPassword];
+
+  if (UPDATE_NUMBER) {
+    if (!env.elevenLabsPhoneNumberId) throw new Error("ELEVENLABS_PHONE_NUMBER_ID is empty; run the full setup first");
+    if (!sipUser || !sipPassword) throw new Error("Fill PHOTON_SIP_USERNAME and PHOTON_SIP_PASSWORD in .env first");
+    const { outbound_trunk_config } = phoneBody({ phoneNumber, agentId: "", sipUser, sipPassword });
+    if (DRY) {
+      console.log("[dry-run] PATCH phone number", JSON.stringify(maskDeep({ outbound_trunk_config }, secrets), null, 2));
+      return;
+    }
+    const res = await fetch(`${API}/v1/convai/phone-numbers/${env.elevenLabsPhoneNumberId}`, {
+      method: "PATCH",
+      headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: env.elevenLabsAgentId || undefined, outbound_trunk_config }),
+    });
+    if (!res.ok) throw new Error(`PATCH phone number -> ${res.status}: ${(await res.text()).slice(0, 800)}`);
+    console.log(`Phone number updated: outbound via ${PHOTON_SIP_HOST} (TLS) with the Photon SIP credential.`);
+    return;
+  }
 
   const missing = Object.entries({
     ELEVENLABS_API_KEY: apiKey,
     PUBLIC_BASE_URL: base && !base.includes("example") ? base : "",
     HUDDLR_SECRET: env.huddlrSecret,
     VOICE_PHONE_NUMBER: phoneNumber,
-    PHOTON_PROJECT_ID: sipUser,
-    PHOTON_PROJECT_SECRET: sipPassword,
+    PHOTON_SIP_USERNAME: sipUser,
+    PHOTON_SIP_PASSWORD: sipPassword,
   })
     .filter(([, v]) => !v)
     .map(([k]) => k);
