@@ -17,7 +17,7 @@ Owner: P4 (Rishi). Setup notes, findings, and the runbook for phone calls. Code 
 
 **Gate 0 (H3):** an inbound and an outbound call both work. **Passed 2026-11-07.**
 
-Open: the post-call recap reaches the server (webhook 2xx) but no iMessage arrived yet. Check `pm2 logs voice` for "no DATABASE_URL" and the `outbox` row status; the sender only texts phones that have texted the Huddlr line first.
+**Post-call recap: working.** After a call the summary arrives in the iMessage thread. If it stops: check `pm2 logs voice` for "no DATABASE_URL" or a 401 (webhook secret), then the `outbox` row status. The sender only texts phones that have texted the Huddlr line first.
 
 ## Fast path: setup script
 
