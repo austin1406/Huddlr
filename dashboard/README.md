@@ -69,7 +69,8 @@ built from P1's numbers (no AI, so every number is exact). Under the table: your
 Getting in needs **the link and the phone**:
 
 1. The link is signed with `HUDDLR_SECRET`, names one phone, and expires after 24 hours.
-   Asking for a new link (`POST /me-link`) cancels that phone's older links, so a forwarded one stops working.
+   Asking for a new link (`POST /me-link`) cancels that phone's older links, so a forwarded one stops working,
+   and signs out every device, so the new link always asks for a code.
 2. Opening it shows "Verify it's you" and texts a 6-digit code into the same iMessage chat (outbox, speaker
    `system`, priority 2 so it jumps the queue). Codes last 10 minutes, work once, allow 5 tries, and at most
    5 can be sent an hour (30 seconds apart).

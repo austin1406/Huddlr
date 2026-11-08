@@ -59,11 +59,17 @@ test("sessions belong to one phone and end on lock or after 24 hours", async () 
   assert.equal(await sessionPhone(d, S, t, 1000), null);
 });
 
-test("a new link cancels older ones", async () => {
+test("a new link cancels older ones and signs out every device", async () => {
   const d = await db();
+  const phoneA = await newSession(d, S, PHONE, 0);
+  const laptop = await newSession(d, S, PHONE, 0);
+  const other = await newSession(d, S, "+19999999999", 0);
   assert.equal(await linksValidFrom(d, PHONE), 0);
   await cancelOlderLinks(d, PHONE, 5_000_000);
   assert.equal(await linksValidFrom(d, PHONE), 5000);
+  assert.equal(await sessionPhone(d, S, phoneA, 5_000_001), null);
+  assert.equal(await sessionPhone(d, S, laptop, 5_000_001), null);
+  assert.equal(await sessionPhone(d, S, other, 5_000_001), "+19999999999"); // someone else's phone: untouched
 });
 
 test("the code is texted ahead of everything else and hidden on the projector", async () => {
