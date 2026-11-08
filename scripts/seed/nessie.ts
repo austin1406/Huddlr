@@ -30,6 +30,10 @@ export class Nessie {
     if (/\/(purchases|deposits)$/.test(path) && !(body as { status?: string })?.status) {
       throw new Error(`Refusing POST ${path} without status: it would break the account in Nessie`);
     }
+    // Same trap for bills: one without payment_date makes the account's bill list return 400.
+    if (/\/bills$/.test(path) && !(body as { payment_date?: string })?.payment_date) {
+      throw new Error(`Refusing POST ${path} without payment_date: it would break the account's bills in Nessie`);
+    }
     const r = await this.req<{ objectCreated?: { _id: string } }>("POST", path, body);
     const id = r.objectCreated?._id;
     if (!id) throw new Error(`POST ${path} returned no id: ${JSON.stringify(r)}`);
