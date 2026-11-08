@@ -71,19 +71,25 @@ function monthsToPayOff(balance: number, r: number, pay: number): number | null 
 export function loanBreakdown(facts: FactsSnapshot, extraPerMonth = 100) {
   const l = account(facts, "car_loan");
   if (!l || !(l.balance > 0) || !l.monthlyPayment) return null;
-  const apr = l.aprPercent ?? 0;
+  return amortize({ label: l.name, owed: l.balance, aprPercent: l.aprPercent ?? 0, monthlyPayment: l.monthlyPayment }, facts.localDate, extraPerMonth);
+}
+
+/** The same breakdown for any loan (the bank's, or one the user told us about), from today's date. */
+export function amortize(loan: { label: string; owed: number; aprPercent: number; monthlyPayment: number }, localDate: string, extraPerMonth = 100) {
+  const apr = loan.aprPercent;
   const r = apr / 100 / 12;
-  const interestThisMonth = round2(l.balance * r);
-  const principalThisMonth = round2(Math.max(0, l.monthlyPayment - interestThisMonth));
-  const n = monthsToPayOff(l.balance, r, l.monthlyPayment);
+  const interestThisMonth = round2(loan.owed * r);
+  const principalThisMonth = round2(Math.max(0, loan.monthlyPayment - interestThisMonth));
+  const n = monthsToPayOff(loan.owed, r, loan.monthlyPayment);
   if (n == null) return null;
   const monthsLeft = Math.ceil(n - 1e-9);
-  const payoff = new Date(`${facts.localDate}T12:00:00Z`);
+  const payoff = new Date(`${localDate}T12:00:00Z`);
   payoff.setUTCMonth(payoff.getUTCMonth() + monthsLeft);
-  const totalInterestLeft = round2(Math.max(0, n * l.monthlyPayment - l.balance));
-  const nExtra = monthsToPayOff(l.balance, r, l.monthlyPayment + extraPerMonth)!;
+  const totalInterestLeft = round2(Math.max(0, n * loan.monthlyPayment - loan.owed));
+  const nExtra = monthsToPayOff(loan.owed, r, loan.monthlyPayment + extraPerMonth)!;
   const monthsSooner = Math.max(0, monthsLeft - Math.ceil(nExtra - 1e-9));
-  const interestSaved = round2(Math.max(0, totalInterestLeft - (nExtra * (l.monthlyPayment + extraPerMonth) - l.balance)));
+  const interestSaved = round2(Math.max(0, totalInterestLeft - (nExtra * (loan.monthlyPayment + extraPerMonth) - loan.owed)));
+  const l = { name: loan.label, balance: loan.owed, monthlyPayment: loan.monthlyPayment };
   return {
     label: l.name, owed: l.balance, aprPercent: apr, monthlyPayment: l.monthlyPayment,
     interestThisMonth, principalThisMonth, monthsLeft,
@@ -487,6 +493,8 @@ export async function speak(
     heard?: Array<{ name: string; text: string }>; extraSources?: unknown[];
     /** Earlier messages this reply must not open the same way as (an "explain that" must rephrase, not repeat). */
     avoidRepeating?: string[];
+    /** Exact phrases the reply must include, with why (e.g. the total owed on all loans). One retry, then the template. */
+    mustMention?: Array<{ text: string; why: string }>;
   } = {},
 ): Promise<SpeakResult> {
   const started = Date.now();
@@ -514,7 +522,11 @@ export async function speak(
       const text = await model(prompt);
       // Checked against this character's own slice, not all 45 forecast days, so stray numbers can't sneak through.
       const check = checkMessage(text, ...sources);
-      const problem = check.ok ? (coachProblem(id, text, opts.plan, opts.ask, opts.heard) ?? styleProblem(id, text) ?? repeatProblem(text, opts.avoidRepeating)) : null;
+      const missed = opts.mustMention?.find((m) => !text.includes(m.text));
+      const problem = check.ok
+        ? (coachProblem(id, text, opts.plan, opts.ask, opts.heard) ?? styleProblem(id, text) ?? repeatProblem(text, opts.avoidRepeating) ??
+          (missed ? `Include ${missed.text} (${missed.why}).` : null))
+        : null;
       attempts.push({ text, ...check, ...(problem ? { ok: false, error: problem } : {}) });
       if (check.ok && !problem && text) return { text, source, attempts, ms: Date.now() - started };
       prompt += problem
