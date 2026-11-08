@@ -2,7 +2,7 @@
   "version": 1,
   "customer": {
     "id": "demo-maya",
-    "firstName": "Maya",
+    "firstName": "Sreyas",
     "lastName": "Rivera",
     "age": 28,
     "timezone": "America/Chicago"
