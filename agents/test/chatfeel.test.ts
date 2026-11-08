@@ -52,8 +52,8 @@ test("bonus debate: Coach signpost first, accounts in turn, a reply threads unde
   const rows = (await db.query<{ id: number; speaker: string; text: string; reply_to: number | null; reply_to_outbox: number | null }>(
     "SELECT id, speaker, text, reply_to, reply_to_outbox FROM outbox ORDER BY id",
   )).rows.map((r) => ({ ...r, id: Number(r.id), reply_to_outbox: r.reply_to_outbox == null ? null : Number(r.reply_to_outbox) }));
-  assert.deepEqual(rows.map((r) => r.speaker), ["coach", "card", "checking", "coach"]);
-  assert.equal(rows[0].text, "Good question. Card and Checking weigh in, then my plan.");
+  assert.deepEqual(rows.map((r) => r.speaker), ["coach", "card", "checking", "savings", "coach"], "every account with a stake gives its option");
+  assert.equal(rows[0].text, "Good question. Card, Checking and Savings weigh in, then my plan.");
   assert.equal(Number(rows[0].reply_to), 1, "the signpost replies to the user's question");
   assert.equal(rows[2].reply_to_outbox, rows[1].id, "Checking's reply threads under Card's message");
   assert.equal(rows[1].reply_to_outbox, null);
@@ -94,4 +94,19 @@ test("welcome: the Coach introduces the crew on a phone's first text, once", asy
   assert.equal(out.rows[0].speaker, "coach");
   assert.equal(out.rows[0].text, welcomeText());
   assert.match(welcomeText(), /^Meet your money: 🏦 Checking, 🐷 Savings, 💳 Card, 🚗 Car Loan and 🌱 IRA each watch one account\. 🧭 Coach always gives the final plan\. Ask anything, or @mention one of them \(like @Savings\)\.$/);
+});
+
+test("an option with a false 'Adding to X:' lead-in loses it and isn't threaded under X", async () => {
+  const db = new PGlite();
+  await migrate(db);
+  const app = createApp({ secret: "", state: new StubState("normal") });
+  const finance = financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch);
+  const now = new Date((await finance.facts()).asOf);
+  await db.query("INSERT INTO inbound_messages (provider_msg_id, user_phone, text, received_sim_at) VALUES ('a', $1, 'x', $2)", [PHONE, now]);
+  const { runOptions } = await import("../src/debate");
+  const model = async (p: string) => p.startsWith("You are Card") ? "Option: put $2,400.00 toward the card; that saves $48.00 a month." : "Adding to Card: Option: claim the $150.00 employer match.";
+  await runOptions({ db, finance, proposals: makeProposalService(db, () => now), userPhone: PHONE, model }, { inboundId: 1, text: "so what should i do", waiting: null }, now);
+  const ira = (await db.query<{ text: string; reply_to_outbox: number | null }>("SELECT text, reply_to_outbox FROM outbox WHERE speaker = 'ira'")).rows[0];
+  assert.equal(ira.text, "Option: claim the $150.00 employer match.");
+  assert.equal(ira.reply_to_outbox, null);
 });

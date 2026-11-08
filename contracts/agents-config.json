@@ -10,9 +10,10 @@
     "timeout_ms": 4000
   },
   "moderator": {
-    "max_speakers_per_event": 3,
+    "max_accounts_per_event": 3,
+    "max_speakers_per_event": 4,
     "coach_always_speaks_when_plan": true,
-    "daily_cap_proactive": 6,
+    "daily_cap_proactive": 8,
     "daily_cap_proactive_demo_mode": 40,
     "quiet_hours": {
       "start_hour": 22,

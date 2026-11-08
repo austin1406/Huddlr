@@ -1,7 +1,7 @@
 // A text that isn't an answer to a proposal: remember any goal or preference in it, then let the right
 // character answer (one speaker, grounded like everything else).
 import type { CharacterId, FactsSnapshot, Plan, ProposalService } from "../../contracts/src";
-import { proposalFromPlan } from "./debate";
+import { proposalFromPlan, type Waiting } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
 import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
@@ -146,6 +146,8 @@ export async function handleChat(
     db: Queryable; facts: () => Promise<FactsSnapshot>; userPhone: string; model?: (p: string) => Promise<string>; finance?: Finance;
     /** Re-points a waiting plan when the user states priorities. Without it, priorities are saved and confirmed only. */
     proposals?: ProposalService;
+    /** "What should I do?" roundtable (debate.ts runOptions): every account's option, then the Coach's bottom line. */
+    options?: (ask: { inboundId: number; text: string; waiting: Waiting | null }, now: Date) => Promise<{ speakers: CharacterId[] }>;
     /** Runs the group debate for a windfall (debate.ts runWindfall). Without it, the question gets one answer. */
     windfall?: (ask: { inboundId: number; text: string; amount: number; label: string }, now: Date) => Promise<{ speakers: CharacterId[] }>;
   },
@@ -170,12 +172,16 @@ export async function handleChat(
 
   const pending = await pendingPlan(deps.db, deps.userPhone);
 
-  // "So what should I do?" gets one clear answer from the Coach, built in code: the action, why, and the rest.
+  // "So what should I do?": each account with a stake gives its option, then the Coach's bottom line (built in code:
+  // the move, why, and the rest for later). Without the roundtable wired in, just the Coach's bottom line.
   // ("I got a $600 bonus, what should I do?" is a new question about new money: that's the bonus debate below.)
   if (isBottomLineQuestion(text) && !parseWindfall(text) && (!parseMention(text) || parseMention(text)!.who === "coach")) {
-    const facts = await deps.facts();
-    const answer = bottomLine(facts, pending ? { actionText: pending.actionText, to: pending.to, plan: pending.plan, windfall: pending.source?.startsWith("chat_windfall_") ?? false } : null);
-    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:bottomline`, speaker: "coach", text: answer });
+    const waiting = pending ? { actionText: pending.actionText, to: pending.to, plan: pending.plan, windfall: pending.source?.startsWith("chat_windfall_") ?? false } : null;
+    if (deps.options) {
+      const r = await deps.options({ inboundId: inbound.id, text, waiting }, now);
+      return { learned: 0, responder: "coach", debate: r.speakers };
+    }
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:bottomline`, speaker: "coach", text: bottomLine(await deps.facts(), waiting) });
     return { learned: 0, responder: "coach" };
   }
 

@@ -49,7 +49,7 @@ test("rent-week shortfall: accounts speak, Coach goes last with P1's plan and a 
   assert.ok(r.firstMessageMs != null && r.planMs != null);
 
   const sent = await outbox();
-  assert.ok(sent.length >= 2 && sent.length <= 3, `got ${sent.length} messages`);
+  assert.ok(sent.length >= 2 && sent.length <= 4, `got ${sent.length} messages`);
   assert.equal(sent.at(-1)!.speaker, "coach", "Coach always last");
   assert.ok(sent.every((m) => m.priority === 2), "a within-48h shortfall is an emergency");
   assert.match(sent.at(-1)!.text, /Move \$143\.00 from Savings to Checking in your bank app/);

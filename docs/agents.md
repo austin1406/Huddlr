@@ -80,6 +80,10 @@ finance isn't on localhost:4000).
 
 ## How a multi-character reply reads
 
+"So what should I do?" gets the same shape: the Coach names who's weighing in, each account with a stake (the plan's
+accounts first) gives its option, and the Coach closes with the code-built bottom line.
+
+
 1. The Coach answers the question first (reply to the user's text) and says who's speaking: "Good question. Card and
    Checking weigh in, then my plan."
 2. Each account explains, in turn, one number and what it means for the user ("that costs you $48.00 a month in
@@ -121,7 +125,7 @@ starting a new one. Replay the phone conversation with real Gemini: `npx tsx scr
 ## Rules that are tested
 
 - 0 ungrounded numbers: Gate 1 (30 runs) runs in CI with a test model that invents a number in every other reply.
-- At most 3 speakers per event, Coach last. Quiet hours 22:00–08:00 and a cap of 6 proactive messages a day
+- Up to 3 accounts per event (each gives its option), then the Coach's bottom line. Quiet hours 22:00–08:00 and a cap of 8 proactive messages a day
   (`demo_mode` lifts both). Emergencies ignore both.
 - The Coach never asks for a YES: it says "Bottom line: … in your bank app." and the plan is checked off when P1's
   watcher sees the transfer (reminder at 60 min; for a shortfall, a call at 90 min if the money hasn't moved). A YES
