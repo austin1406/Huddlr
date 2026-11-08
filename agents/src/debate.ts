@@ -7,7 +7,7 @@
 // Budgets: first message ~5 s, plan ~15 s (real clock, latency). Round 2 is skipped for now: one round fits the
 // budget and keeps the chat quiet. Calendar decisions (quiet hours, cap) use the simulated clock.
 import { localDate, type CharacterId, type FactsSnapshot, type FinanceEvent, type Plan, type ProposalService } from "../../contracts/src";
-import { config, speak } from "./character";
+import { character, config, speak } from "./character";
 import type { Queryable } from "./db";
 import type { Finance } from "./finance";
 import { buildDigest, decide, type Decision } from "./moderator";
@@ -102,8 +102,9 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
       event_id: event.id, proposal_id: proposalId, priority, created_sim_at: now.toISOString(),
     });
 
-  // Coach work starts now, in parallel with the accounts: plan, proposal, then its line.
-  const coachWork = withCoach
+  // The Coach's plan and proposal start now, in parallel with the accounts. Its line waits for the accounts,
+  // so it can answer what they actually said (about a second, well inside the plan budget).
+  const coachPrep = withCoach
     ? (async () => {
         const amount = planAmount(event, facts);
         const plan = amount ? await finance.plan(amount).catch(() => null) : null;
@@ -115,25 +116,27 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
           if (proposalId != null)
             await scheduleProposalFollowUps(db, { userPhone, proposalId, now, emergency: facts.shortfall?.within48Hours === true });
         }
-        const line = await speak("coach", facts, situation("coach", event), {
-          event, plan, ask: ask?.actionText ?? null, model: deps.model, deadline: started + config.debate.plan_target_ms,
-        });
-        return { line, proposalId };
+        return { plan, ask, proposalId };
       })()
     : null;
 
   // Accounts: queue each one the moment it passes the checker.
+  const heard: Array<{ name: string; text: string }> = [];
   await Promise.all(
     accounts.map(async (id) => {
       const r = await speak(id, facts, situation(id, event), { event, model: deps.model, deadline: started + config.debate.first_message_target_ms });
       await queue(id, r.text);
+      heard.push({ name: character(id).name, text: r.text });
       result.firstMessageMs ??= Date.now() - started;
       result.messages.push({ speaker: id, source: r.source, ms: r.ms });
     }),
   );
 
-  if (coachWork) {
-    const { line, proposalId } = await coachWork;
+  if (coachPrep) {
+    const { plan, ask, proposalId } = await coachPrep;
+    const line = await speak("coach", facts, situation("coach", event), {
+      event, plan, ask: ask?.actionText ?? null, heard, model: deps.model, deadline: started + config.debate.plan_target_ms,
+    });
     await queue("coach", line.text, proposalId);
     result.planMs = Date.now() - started;
     result.firstMessageMs ??= result.planMs;

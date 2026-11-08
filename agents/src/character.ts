@@ -12,6 +12,8 @@ export interface CastMember {
   emoji: string;
   account: Account["id"] | null;
   voice: string;
+  /** What this account argues for, so characters take a side instead of being vague. */
+  wants: string;
   speaks_on: string[];
 }
 
@@ -54,25 +56,101 @@ export function factsFor(id: CharacterId, facts: FactsSnapshot, event?: FinanceE
   return { ...slice[id], event: latestEvent, pendingProposals: facts.pendingProposals };
 }
 
-export function buildPrompt(id: CharacterId, facts: FactsSnapshot, situation: string, event?: FinanceEvent | null, plan?: Plan | null, ask?: string | null): string {
+const fmtUsd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+/**
+ * The few numbers this character should lead with, already formatted the way it should say them.
+ * Every value comes straight from the facts, so the checker accepts them as written.
+ */
+export function keyNumbers(id: CharacterId, facts: FactsSnapshot, event?: FinanceEvent | null): string[] {
+  const a = (x: Account["id"]) => account(facts, x);
+  const ind = (x: IndicatorId) => indicator(facts, x);
+  const f = facts.forecast;
+  const s = facts.shortfall;
+  const out: string[] = [];
+  const amount = event && typeof event.data.amount === "number" ? fmtUsd(event.data.amount) : null;
+  if (event && amount) out.push(`what just happened: ${event.type.replace(/_/g, " ")} of ${amount}${event.data.merchant ? ` at ${event.data.merchant}` : ""}`);
+  switch (id) {
+    case "checking":
+      out.push(`your balance: ${fmtUsd(a("checking")!.balance)}`);
+      if (s) out.push(`short by ${fmtUsd(s.amount)} on ${fmtDate(s.firstNegativeDate)}`, `a transfer of ${fmtUsd(s.suggestedTransfer)} fixes it`);
+      else out.push(`safe to spend until payday: ${fmtUsd(f.safeToSpendUntilPayday)}`);
+      out.push(`next payday: ${fmtDate(f.nextPayday)}`);
+      break;
+    case "savings":
+      out.push(`your balance: ${fmtUsd(a("savings")!.balance)}`, `cushion: ${ind("runway")!.value} months of essentials`);
+      break;
+    case "card": {
+      const c = a("card")!;
+      out.push(`balance owed: ${fmtUsd(c.balance)}`, `APR: ${c.aprPercent}%`, `utilization: ${ind("credit_utilization")!.value}%`);
+      break;
+    }
+    case "car_loan": {
+      const l = a("car_loan")!;
+      out.push(`monthly payment: ${fmtUsd(l.monthlyPayment ?? 0)}`, `still owed: ${fmtUsd(l.balance)}`);
+      break;
+    }
+    case "ira": {
+      const i = a("ira")!;
+      out.push(`balance: ${fmtUsd(i.balance)}`);
+      if (i.unclaimedMatchThisYear) out.push(`employer match left unclaimed this year: ${fmtUsd(i.unclaimedMatchThisYear)}`);
+      break;
+    }
+    case "coach":
+      if (s) out.push(`Checking is short by ${fmtUsd(s.amount)} on ${fmtDate(s.firstNegativeDate)}`);
+      break;
+  }
+  return out;
+}
+
+export function buildPrompt(
+  id: CharacterId,
+  facts: FactsSnapshot,
+  situation: string,
+  event?: FinanceEvent | null,
+  plan?: Plan | null,
+  ask?: string | null,
+  heard?: Array<{ name: string; text: string }>,
+): string {
   const c = character(id);
-  const coachRules = id === "coach" && plan
-    ? [
-        `- In one short sentence, say why this plan settles it. Then end with exactly: "Reply YES to: ${ask ?? "this plan"}."`,
-        `- At most 3 sentences. Only amounts from PLAN or FACTS.`,
-        `PLAN: ${JSON.stringify(plan)}`,
-      ]
-    : [];
+  const isCoach = id === "coach";
   return [
-    `You are ${c.name}, a bank account in a group chat with its owner. Personality: ${c.voice}`,
-    `Rules:`,
-    `- At most 2 short sentences, plain words, no emoji, no "${c.name}:" prefix.`,
-    `- Use ONLY numbers and dates that appear in FACTS, copied exactly. Never compute, estimate, or invent a number.`,
-    `- If you need a number that is not in FACTS, say it without a number.`,
-    `- Write money like $1,186.50 and dates like Nov 20 (never 2026-11-20).`,
-    `- Never move money, never ask for passwords, codes, or account numbers. No specific investment advice.`,
-    `FACTS: ${JSON.stringify(factsFor(id, facts, event))}`,
-    ...coachRules,
+    `You are ${c.name}${c.account ? ", one of the user's bank accounts," : ""} in a group chat with the user and their other accounts.`,
+    `Personality: ${c.voice}`,
+    `You always argue for: ${c.wants}`,
+    ``,
+    `How to write:`,
+    `- Talk TO the user as "you". Never use their name or call them "the user".`,
+    isCoach
+      ? `- At most 3 short sentences: say who is right and why in one sentence, then the action.`
+      : `- Exactly 2 short sentences. Sentence 1: the one number that matters most right now, from KEY NUMBERS. Sentence 2: what you want to happen, from your side, even if the others disagree.`,
+    `- Copy numbers and dates exactly as written in KEY NUMBERS or FACTS. Never add, subtract, round, or invent a number.`,
+    `- Plain words, no emoji, no "${c.name}:" prefix, no hashtags.`,
+    `- You can't move money and never ask for passwords, codes, or account numbers. No specific investment picks.`,
+    ``,
+    `KEY NUMBERS:`,
+    ...keyNumbers(id, facts, event).map((k) => `- ${k}`),
+    ...(heard?.length ? [``, `WHAT THE OTHERS JUST SAID:`, ...heard.map((h) => `- ${h.name}: ${h.text}`)] : []),
+    ...(isCoach && plan
+      ? [
+          ``,
+          `PLAN (from the finance engine): ${JSON.stringify(plan)}`,
+          ...(plan.lines[0]
+            ? (() => {
+                const winner = destName(String(plan.lines[0].destination));
+                const why = REASON[plan.lines[0].reasonCode] ?? plan.lines[0].reasonCode;
+                return heard?.some((h) => h.name === winner)
+                  ? [`The plan sides with ${winner} (${why}). Say ${winner} is right, not another account.`]
+                  : [`The plan sends money to ${winner} (${why}), but ${winner} hasn't spoken. Don't say anyone "is right"; just give the reason in plain words.`];
+              })()
+            : []),
+          `End with exactly: "Reply YES to: ${ask ?? "this plan"}."`,
+        ]
+      : []),
+    ``,
+    `FACTS (for reference): ${JSON.stringify(factsFor(id, facts, event))}`,
+    ``,
     `SITUATION: ${situation}`,
   ].join("\n");
 }
@@ -140,7 +218,7 @@ export async function callModel(prompt: string, opts: { model: string; apiKey: s
   if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
   geminiQuota.ok();
   const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
+  return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").replace(/\s*\n+\s*/g, " ").trim();
 }
 
 export interface SpeakResult {
@@ -151,6 +229,29 @@ export interface SpeakResult {
 }
 
 /**
+ * Extra rules for the Coach's plan message, enforced in code like the number checker:
+ * the exact YES line must be there (it is what the user approves), and it may not crown the wrong account.
+ */
+export function coachProblem(
+  id: CharacterId,
+  text: string,
+  plan?: Plan | null,
+  ask?: string | null,
+  heard?: Array<{ name: string; text: string }>,
+): string | null {
+  if (id !== "coach" || !plan) return null;
+  if (ask && !text.includes(`Reply YES to: ${ask}`)) return `It must end with exactly "Reply YES to: ${ask}."`;
+  const first = plan.lines[0];
+  if (!first) return null;
+  const winner = destName(String(first.destination));
+  const crowned = [...text.matchAll(/\b(Checking|Savings|Card|Car Loan|IRA)\s+(?:is|was)\s+right\b/gi)].map((m) => m[1].toLowerCase());
+  const winnerSpoke = heard?.some((h) => h.name === winner) ?? false;
+  if (crowned.some((n) => n !== winner.toLowerCase()) || (crowned.length && !winnerSpoke))
+    return winnerSpoke ? `Only ${winner} is right here; the plan sides with ${winner}.` : `Don't say any account "is right"; ${winner} didn't speak.`;
+  return null;
+}
+
+/**
  * Produce one grounded line for a character.
  * opts.model replaces Gemini in tests; opts.deadline is a real-clock ms timestamp (delivery timing, not calendar).
  */
@@ -158,7 +259,7 @@ export async function speak(
   id: CharacterId,
   facts: FactsSnapshot,
   situation: string,
-  opts: { model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; plan?: Plan | null; ask?: string | null; extraSources?: unknown[] } = {},
+  opts: { model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; plan?: Plan | null; ask?: string | null; heard?: Array<{ name: string; text: string }>; extraSources?: unknown[] } = {},
 ): Promise<SpeakResult> {
   const started = Date.now();
   const cm = config.character_model;
@@ -172,7 +273,7 @@ export async function speak(
         timeoutMs: Math.max(500, Math.min(cm.timeout_ms, deadline - Date.now())),
       }));
   const attempts: SpeakResult["attempts"] = [];
-  let prompt = buildPrompt(id, facts, situation, opts.event, opts.plan, opts.ask);
+  let prompt = buildPrompt(id, facts, situation, opts.event, opts.plan, opts.ask, opts.heard);
   const sources = [factsFor(id, facts, opts.event), ...(opts.plan ? [opts.plan] : []), ...(opts.extraSources ?? [])];
 
   for (const source of ["model", "retry"] as const) {
@@ -185,9 +286,12 @@ export async function speak(
       const text = await model(prompt);
       // Checked against this character's own slice, not all 45 forecast days, so stray numbers can't sneak through.
       const check = checkMessage(text, ...sources);
-      attempts.push({ text, ...check });
-      if (check.ok && text) return { text, source, attempts, ms: Date.now() - started };
-      prompt += `\nYour last reply used numbers not in FACTS: ${check.ungrounded.map((u) => u.raw).join(", ")}. Rewrite without them.`;
+      const problem = check.ok ? coachProblem(id, text, opts.plan, opts.ask, opts.heard) : null;
+      attempts.push({ text, ...check, ...(problem ? { ok: false, error: problem } : {}) });
+      if (check.ok && !problem && text) return { text, source, attempts, ms: Date.now() - started };
+      prompt += problem
+        ? `\nYour last reply had a problem: ${problem} Rewrite it.`
+        : `\nYour last reply used numbers not in FACTS: ${check.ungrounded.map((u) => u.raw).join(", ")}. Rewrite without them.`;
     } catch (err) {
       attempts.push({ error: err instanceof QuotaError ? `quota (${err.scope})` : String((err as Error).message ?? err) });
       if (err instanceof QuotaError) break; // a retry would hit the same limit
