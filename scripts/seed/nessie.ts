@@ -26,6 +26,10 @@ export class Nessie {
   }
 
   async create(path: string, body: unknown): Promise<string> {
+    // A purchase without status permanently breaks that account's purchase list (docs/nessie.md).
+    if (/\/(purchases|deposits)$/.test(path) && !(body as { status?: string })?.status) {
+      throw new Error(`Refusing POST ${path} without status: it would break the account in Nessie`);
+    }
     const r = await this.req<{ objectCreated?: { _id: string } }>("POST", path, body);
     const id = r.objectCreated?._id;
     if (!id) throw new Error(`POST ${path} returned no id: ${JSON.stringify(r)}`);

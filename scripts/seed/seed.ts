@@ -15,7 +15,8 @@ const DRY = args.has("--dry-run");
 const RESET = args.has("--reset");
 
 const key = process.env.NESSIE_API_KEY ?? "";
-const base = process.env.NESSIE_BASE_URL || "http://api.nessieisreal.com";
+// Plain http times out (docs/nessie.md).
+const base = process.env.NESSIE_BASE_URL || "https://api.nessieisreal.com";
 if (!key && !DRY) {
   console.error("NESSIE_API_KEY is not set in .env");
   process.exit(1);
@@ -123,6 +124,9 @@ async function main() {
     await api.create(`/accounts/${x.onCard ? card : checking}/purchases`, {
       merchant_id: merchantIds[x.merchant],
       medium: "balance",
+      // Without status, Nessie stores the purchase but then fails every read of the account's
+      // purchase list, and purchases can't be deleted (docs/nessie.md).
+      status: "completed",
       purchase_date: dateFor(x.daysAgo),
       amount: x.amount,
       description: p.seedHints.merchants[x.merchant].name,
@@ -137,7 +141,7 @@ async function main() {
     // Paychecks every everyDays, with the latest one lastPaidDaysAgo days ago.
     if (daysAgo >= p.income.lastPaidDaysAgo && (daysAgo - p.income.lastPaidDaysAgo) % p.income.everyDays === 0) {
       await api.create(`/accounts/${checking}/deposits`, {
-        medium: "balance", transaction_date: date, amount: p.income.paycheckAmount, description: "Paycheck",
+        medium: "balance", transaction_date: date, status: "completed", amount: p.income.paycheckAmount, description: "Paycheck",
       });
       deposits++;
     }
