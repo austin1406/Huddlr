@@ -144,3 +144,31 @@ test("phone test: 'check with @loan if i can get a house' and 'so can i take out
     createApp({ secret: "", state: new StubState("normal") }).request(u.replace("http://f", ""), i)) as typeof fetch).facts(), []);
   assert.equal(h.debtSharePercent, 11);
 });
+
+test("phone test: 'hey' gets a short hello from the Coach, not the whole table", async () => {
+  const { isSmallTalk } = await import("../src/chat");
+  for (const t of ["hey", "Hey!", "hi guys", "thanks!", "ok cool", "good morning", "lol"]) assert.equal(isSmallTalk(t), true, t);
+  for (const t of ["hey can i afford $40", "how am i doing?", "should I pay off my card?", "hey what's my balance"]) assert.equal(isSmallTalk(t), false, t);
+
+  const prompts: string[] = [];
+  const { chat, out } = await setup(async (p) => {
+    prompts.push(p);
+    return "Hey Maya! What's on your mind today?";
+  });
+  const r = await chat("hey");
+  assert.equal(r.responder, "coach");
+  assert.equal(r.debate, undefined, "no roundtable");
+  assert.deepEqual((await out()).map((x) => x.text), ["Hey Maya! What's on your mind today?"]);
+  assert.match(prompts.at(-1)!, /That's small talk, not a money question/);
+});
+
+test("replay: computer dates and 'Adding to Checking' when Checking never spoke are sent back for a rewrite", async () => {
+  const { voiceProblem } = await import("../src/character");
+  assert.match(voiceProblem("Rent is due on 2026-12-01.") ?? "", /like "Dec 1"/);
+  assert.equal(voiceProblem("Rent is due Dec 1."), null);
+  const heard = [{ name: "Savings", text: "…" }, { name: "Card", text: "…" }];
+  assert.match(voiceProblem("Adding to Checking: a lender looks at your $392.00 in payments.", heard) ?? "", /Don't refer to Checking/);
+  assert.equal(voiceProblem("Adding to Savings: a lender looks at your $392.00 in payments.", heard), null);
+  assert.equal(voiceProblem("Like Checking, I'd keep it simple.", heard), null, "a plain comparison isn't a reference to what someone said");
+  assert.equal(voiceProblem("Adding to Checking: hi.", undefined), null, "only in a roundtable");
+});

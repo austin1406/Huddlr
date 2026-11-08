@@ -473,6 +473,23 @@ export function styleProblem(id: CharacterId, text: string): string | null {
   return null;
 }
 
+/**
+ * Phone/replay testing: "rent is due on 2026-12-01" (a computer date) and Loan opening "Adding to Checking:" when Checking
+ * never spoke. Dates read like a text ("Dec 1"); in a roundtable, only an account that already spoke can be built on.
+ */
+export function voiceProblem(text: string, heard?: Array<{ name: string; text: string }>): string | null {
+  if (/\b\d{4}-\d{2}-\d{2}\b/.test(text)) return `Write dates the way people text them, like "Dec 1", never like 2026-12-01.`;
+  if (heard) {
+    const named = [...text.matchAll(/\b(?:adding to|add to|building on|build on|agree with|echoing|like|as)\s+(?:what\s+)?(Checking|Savings|Card|Loan|Car Loan|IRA|Coach)\b(?:\s+(?:said|says|mentioned|noted|pointed out))?/gi)]
+      .filter((m) => /^(adding|add|building|build|agree|echoing)/i.test(m[0]) || /(said|says|mentioned|noted|pointed out)$/i.test(m[0]))
+      .map((m) => m[1].toLowerCase());
+    const spoke = (n: string) => heard.some((h) => h.name.toLowerCase() === n || (n === "car loan" && h.name.toLowerCase() === "loan"));
+    const ghost = named.find((n) => !spoke(n));
+    if (ghost) return `Don't refer to ${ghost[0].toUpperCase()}${ghost.slice(1)}; they haven't said anything yet. Just make your own point.`;
+  }
+  return null;
+}
+
 /** An explanation that opens with the same sentence it's explaining isn't an explanation. */
 export function repeatProblem(text: string, avoid?: string[]): string | null {
   if (!avoid?.length) return null;
@@ -532,7 +549,7 @@ export async function speak(
       const check = checkMessage(text, ...sources);
       const missed = opts.mustMention?.find((m) => !text.includes(m.text));
       const problem = check.ok
-        ? (coachProblem(id, text, opts.plan, opts.ask, opts.heard) ?? styleProblem(id, text) ?? repeatProblem(text, opts.avoidRepeating) ??
+        ? (coachProblem(id, text, opts.plan, opts.ask, opts.heard) ?? styleProblem(id, text) ?? voiceProblem(text, opts.heard) ?? repeatProblem(text, opts.avoidRepeating) ??
           (missed ? `Include ${missed.text} (${missed.why}).` : null))
         : null;
       attempts.push({ text, ...check, ...(problem ? { ok: false, error: problem } : {}) });
