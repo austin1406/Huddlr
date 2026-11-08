@@ -48,6 +48,17 @@ Update later with `/opt/huddlr/photon/deploy/deploy.sh`.
 - Shared lines support direct chats only (no groups).
 - Webhooks: verify the raw body, return 2xx fast, dedupe by `webhook-id`; Photon retries on 404/408/429/5xx.
 
+## Seat tool (adding phones)
+
+On the server, from `/opt/huddlr/photon`:
+
+```bash
+npm run seat -- add 4695551234 "Judge Alex"   # prints the agent number that phone should text
+npm run seat -- list                          # everyone seated, and seats used (25 max)
+```
+
+Safe to re-run for the same phone. The person must text the agent number first (blue iMessage); until then the agents' messages to them wait as `held` and go out the moment they text.
+
 ## How messages flow
 
 - **In:** Photon webhook → signature check → `inbound_messages` row (duplicate deliveries ignored via `provider_msg_id`). If the DB write fails we return 503 so Photon retries. P2's agents poll that table.
@@ -63,4 +74,4 @@ Settings: `DATABASE_URL` (shared `/opt/huddlr/.env`), `PHOTON_SENDER=0` pauses t
 
 - Indicator card PNG renderer for `attachment: indicator_card` (H6-7); until then those rows send text only
 - ~~Store inbound photos~~ done: saved to `data/attachments/`, paths in `inbound_messages.attachment_paths`, bytes at `GET /photon/attachments/:id` (needs `x-huddlr-secret`)
-- Seat tool (H8-9)
+
