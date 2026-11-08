@@ -6,7 +6,7 @@ import { StubState } from "../../finance/src/state";
 import { handleChat } from "../src/chat";
 import { cast } from "../src/character";
 import { migrate } from "../src/db";
-import { runOptions, runWindfall } from "../src/debate";
+import { runOptions, runRoundtable, runWindfall } from "../src/debate";
 import { financeClient } from "../src/finance";
 import { makeProposalService } from "../src/proposals";
 
@@ -32,7 +32,8 @@ for (const [i, text] of texts.entries()) {
   await handleChat(
     { db, facts: () => finance.facts(), userPhone: PHONE, finance, proposals,
       windfall: (ask, at) => runWindfall({ db, finance, proposals, userPhone: PHONE }, ask, at),
-      options: (ask, at) => runOptions({ db, finance, proposals, userPhone: PHONE }, ask, at) },
+      options: (ask, at) => runOptions({ db, finance, proposals, userPhone: PHONE }, ask, at),
+      roundtable: (ask, at) => runRoundtable({ db, finance, proposals, userPhone: PHONE }, ask, at) },
     { id, text },
     now,
   );

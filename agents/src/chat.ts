@@ -1,7 +1,7 @@
 // A text that isn't an answer to a proposal: remember any goal or preference in it, then let the right
 // character answer (one speaker, grounded like everything else).
 import type { CharacterId, FactsSnapshot, Plan, ProposalService } from "../../contracts/src";
-import { proposalFromPlan, type Waiting } from "./debate";
+import { accountsInQuestion, proposalFromPlan, type Waiting } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
 import { allMovesText, leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
@@ -166,6 +166,8 @@ export async function handleChat(
     proposals?: ProposalService;
     /** "What should I do?" roundtable (debate.ts runOptions): every account's option, then the Coach's bottom line. */
     options?: (ask: { inboundId: number; text: string; waiting: Waiting | null }, now: Date) => Promise<{ speakers: CharacterId[] }>;
+    /** General questions (debate.ts runRoundtable): the accounts weigh in, then the Coach. Without it, the Coach alone. */
+    roundtable?: (ask: { inboundId: number; text: string; context?: string; extraSources?: unknown[] }, now: Date) => Promise<{ speakers: CharacterId[] }>;
     /** Runs the group debate for a windfall (debate.ts runWindfall). Without it, the question gets one answer. */
     windfall?: (ask: { inboundId: number; text: string; amount: number; label: string }, now: Date) => Promise<{ speakers: CharacterId[] }>;
   },
@@ -316,6 +318,19 @@ export async function handleChat(
       ? [`Answer their latest text as part of this conversation, not from scratch. If they're confused about the plan, explain plainly what it does and why, with its numbers. Never contradict the waiting plan or invent a different one.`]
       : []),
   ].join("\n");
+
+  // A general question that would go to the Coach alone gets the whole table: the accounts it touches weigh in, then
+  // the Coach's bottom line. (@-mentions, follow-ups, "explain…" and the Coach explaining a waiting plan stay one voice.)
+  // A question naming two or more accounts ("card or savings first?") also gets the table, not just one of them.
+  const general = responder === "coach" || accountsInQuestion(text).length >= 2;
+  if (general && !mention && !followUp && !explain && !explainingPlan && !thinkingAboutLoan && deps.roundtable) {
+    const r = await deps.roundtable({
+      inboundId: inbound.id, text, context,
+      extraSources: [...goals.map((g) => g.value), extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : [])), recent.numbers, ...(pending ? [pending.plan] : [])],
+    }, now);
+    return { learned: 0, responder: "coach", debate: r.speakers };
+  }
+
   const r = await speak(responder, facts, `${ask}${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}${context ? `\n${context}` : ""}`, {
     model: deps.model,
     // A reply to the user's own text: Gemini gets time for several tries before anything pre-written is considered.

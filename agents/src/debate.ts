@@ -250,6 +250,64 @@ function accountsWithAStake(facts: FactsSnapshot): CharacterId[] {
   ];
 }
 
+/** Accounts a question is about ("should I pay off my card or save?" -> Card, Savings), in the order they're named. */
+export function accountsInQuestion(text: string): CharacterId[] {
+  const t = text.toLowerCase();
+  const hits: Array<[number, CharacterId]> = [];
+  const find = (re: RegExp, id: CharacterId) => { const m = t.search(re); if (m >= 0) hits.push([m, id]); };
+  find(/\b(card|credit|apr|interest|utiliz)/, "card");
+  find(/\b(sav(e|ing|ings)|cushion|emergency fund|rainy day)\b/, "savings");
+  find(/\b(ira|retire\w*|401k|match|invest\w*)\b/, "ira");
+  find(/\b(loans?|car|mortgage|tuition|student|debt)\b/, "car_loan");
+  find(/\b(checking|spend|afford|bills?|rent|payday|paycheck|budget)\b/, "checking");
+  return [...new Set(hits.sort((a, b) => a[0] - b[0]).map(([, id]) => id))];
+}
+
+/**
+ * A general question that would have gone to the Coach alone ("how should I budget this month?", "18000 for 24
+ * months"): every account it touches weighs in (up to 3, then the ones with something pressing), and the Coach
+ * closes with a Gemini-written "Bottom line:" that answers the question. Nothing pre-written unless Gemini is out
+ * of quota.
+ */
+export async function runRoundtable(
+  deps: Omit<DebateDeps, "clock">,
+  ask: { inboundId: number; text: string; context?: string; extraSources?: unknown[] },
+  now: Date,
+): Promise<{ speakers: CharacterId[] }> {
+  const { db, finance, userPhone } = deps;
+  const started = Date.now();
+  const facts = await finance.facts();
+  const maxAccounts: number = config.moderator.max_accounts_per_event ?? 3;
+  let accounts = [...new Set([...accountsInQuestion(ask.text), ...accountsWithAStake(facts)])].slice(0, maxAccounts) as CharacterId[];
+  if (!accounts.length) accounts = ["checking", "savings", "card"];
+
+  const queue = (speaker: CharacterId, text: string, replyToOutbox: number | null = null, key: string = speaker) =>
+    queueOutbox(db, {
+      idempotency_key: `inbound:${ask.inboundId}:${key}`, user_phone: userPhone, speaker, text, reply_to: ask.inboundId,
+      reply_to_outbox: replyToOutbox, thread_key: `inbound:${ask.inboundId}`, priority: 1, created_sim_at: now.toISOString(),
+    });
+  const names = accounts.map((id) => character(id).name);
+  const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  await queue("coach", `Good question. ${who} weigh${names.length > 1 ? "" : "s"} in, then my bottom line.`, null, "coach-open");
+
+  const context = ask.context ? `\n${ask.context}` : "";
+  const extraSources = ask.extraSources ?? [];
+  // Replies get more time than proactive debates: the user is waiting for this answer.
+  const replyDeadline = started + (config.debate.chat_reply_deadline_ms ?? 15000);
+  const heard = await speakInTurn(accounts, started,
+    (id, heardSoFar) =>
+      speak(id, facts, `The user asked: "${ask.text}". Answer it from your account's side in 1-2 short sentences, with one number. If it doesn't really touch your account, say briefly what it means for you anyway.${context}`, {
+        model: deps.model, deadline: Math.min(Date.now() + 8000, replyDeadline), heard: heardSoFar, extraSources,
+      }),
+    (id, text, replyToOutbox) => queue(id, text, replyToOutbox));
+
+  const line = await speak("coach", facts, `The user asked: "${ask.text}". The accounts just weighed in. Start with "Bottom line:" and answer the user's question directly in plain words, using what the accounts said. Don't ask them to reply YES.${context}`, {
+    model: deps.model, deadline: Math.max(replyDeadline, Date.now() + 6000), heard, extraSources,
+  });
+  await queue("coach", line.text);
+  return { speakers: [...accounts, "coach"] };
+}
+
 /**
  * "So what should I do?": a short roundtable. The Coach says who's weighing in, each account with a stake gives its
  * option (up to 3, in turn, so they can build on each other), and the Coach closes with the bottom line, built in

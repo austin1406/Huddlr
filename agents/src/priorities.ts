@@ -35,6 +35,8 @@ const P = (s: string) => new RegExp(s.replace(/ACCT/g, ACCT).replace(/MY/g, Stri
 /** What a text says about priorities, or null if it says nothing about them. */
 export function parsePriorities(text: string): (Partial<Priorities> & { clear?: boolean }) | null {
   const t = text.trim();
+  // A question asks for advice; it doesn't set priorities ("should I pay off my card or build savings first?").
+  if (/\?\s*$/.test(t) || /^(should|what|which|how|why|can|could|would|is|are|do|does)\b/i.test(t)) return null;
   if (/\b(reset|clear|forget|remove|drop)\b[^.?!]*\bpriorit/i.test(t) || /\bno (more )?priorities\b/i.test(t)) return { clear: true };
   const out: Partial<Priorities> = {};
   const add = (k: keyof Priorities, p: Pot | null) => p && !(out[k] ??= []).includes(p) && out[k]!.push(p);

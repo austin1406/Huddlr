@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app";
 import { handleChat } from "./chat";
 import { migrate, pool, readClock, type Queryable } from "./db";
-import { maybeSendDigest, pollEvents, runOptions, runWindfall, type DebateDeps } from "./debate";
+import { maybeSendDigest, pollEvents, runOptions, runRoundtable, runWindfall, type DebateDeps } from "./debate";
 import { maybeWelcome } from "./welcome";
 import { huddleLinkClient, replyWithHuddleLink } from "./huddle";
 import { devRoutes } from "./dev";
@@ -116,6 +116,7 @@ every(env.pollMs, "inbound", async () => {
           db, facts: () => finance.facts(), userPhone: row.user_phone, finance, proposals,
           windfall: (ask, t) => runWindfall({ db, finance, proposals, userPhone: row.user_phone }, ask, t),
           options: (ask, t) => runOptions({ db, finance, proposals, userPhone: row.user_phone }, ask, t),
+          roundtable: (ask, t) => runRoundtable({ db, finance, proposals, userPhone: row.user_phone }, ask, t),
         },
         { id: Number(row.id), text: row.text },
         at,
