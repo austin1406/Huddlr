@@ -4,12 +4,14 @@
 import type { InboundRow, ProposalService, ProposalSummary } from "../../contracts/src";
 import type { Queryable } from "./db";
 import { queueOutbox } from "./outbox";
+import { isHuddleLinkRequest } from "./huddle";
 import { isRecallQuestion } from "./recall";
 import { classifyReply } from "./reply";
 
 export type HandleResult =
   | { kind: "duplicate" }
   | { kind: "chat" }
+  | { kind: "huddle_link" }
   | { kind: "accepted" | "declined" | "expired" | "clarify" | "noop"; proposalId: number };
 
 /** "so what should i do", "what now", "what's the bottom line", "tldr", "i don't know what to do". */
@@ -47,6 +49,9 @@ export async function handleInbound(
      VALUES ($1, 'text', 'in', 'user', $2, $3, $4)`,
     [row.user_phone, text, row.id, now],
   );
+
+  // "huddle link": the caller replies with a fresh link to the Huddle page. Never an answer to a pending plan.
+  if (isHuddleLinkRequest(text)) return { kind: "huddle_link" };
 
   const pending = await proposals.getPending(row.user_phone);
   const intent = classifyReply(text);
