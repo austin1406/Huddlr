@@ -62,5 +62,5 @@ Settings: `DATABASE_URL` (shared `/opt/huddlr/.env`), `PHOTON_SENDER=0` pauses t
 ## Planned
 
 - Indicator card PNG renderer for `attachment: indicator_card` (H6-7); until then those rows send text only
-- Store inbound photos and expose the path to P2 (H7-8)
+- ~~Store inbound photos~~ done: saved to `data/attachments/`, paths in `inbound_messages.attachment_paths`, bytes at `GET /photon/attachments/:id` (needs `x-huddlr-secret`)
 - Seat tool (H8-9)

@@ -8,6 +8,8 @@ import { markDelivered, saveInbound } from "./inbound.js";
 import { attachmentIds, findMessage, isFromHuman } from "./message.js";
 import { sendText, setTyping } from "./photon.js";
 import { runSender } from "./sender.js";
+import { getAttachment, storeInboundAttachments } from "./attachments.js";
+import { timingSafeEqual } from "node:crypto";
 
 mkdirSync("data", { recursive: true });
 const app = new Hono();
@@ -60,6 +62,13 @@ app.post("/photon/webhook", async (c) => {
       try {
         const id = await saveInbound(db, msg); // duplicate deliveries return null and are ignored
         if (id) console.log("[inbound] saved row", id);
+        const ids = attachmentIds(msg);
+        if (id && ids.length) {
+          const d = db;
+          void storeInboundAttachments(d, id, ids)
+            .then((paths) => console.log("[inbound] stored", paths.join(", ")))
+            .catch((err) => console.error("[inbound] attachment download failed:", (err as Error).message));
+        }
       } catch (err) {
         console.error("[inbound] DB save failed, asking Photon to retry:", (err as Error).message);
         return c.body(null, 503);
@@ -71,6 +80,25 @@ app.post("/photon/webhook", async (c) => {
   }
   return c.body(null, 204);
 });
+
+/** P2 reads photo bytes here (agents/src/photo.ts httpImageFetcher). Needs the shared secret. */
+app.get("/photon/attachments/:id", async (c) => {
+  if (!sameSecret(c.req.header("x-huddlr-secret"), env.secret)) return c.json({ error: "unauthorized" }, 401);
+  try {
+    const a = await getAttachment(c.req.param("id"));
+    if (!a) return c.json({ error: "not found" }, 404);
+    return c.body(new Uint8Array(a.bytes).buffer as ArrayBuffer, 200, { "content-type": a.mime, "cache-control": "private, max-age=3600" });
+  } catch (err) {
+    console.error("[attachments] fetch failed:", (err as Error).message);
+    return c.json({ error: "not available" }, 502);
+  }
+});
+
+function sameSecret(given: string | undefined, expected: string): boolean {
+  if (!expected) return false; // never serve user photos without a configured secret
+  const a = Buffer.from(given ?? ""), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 async function echoReply(msg: NonNullable<ReturnType<typeof findMessage>>) {
   const target = { spaceId: msg.space.id, senderId: msg.receivedBy!.id! };
