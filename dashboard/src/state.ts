@@ -99,6 +99,19 @@ export async function loadChat(db: Db, phone: string, limit = 40): Promise<ChatL
     .map((x) => ({ at: new Date(x.at).toISOString(), from: x.from, text: hideCodes(x.text ?? ""), status: x.status ?? undefined, photo: x.photo || undefined }));
 }
 
+/** Loans the user told the chat about (P2 saves them in memory_facts as loan:<name>). Empty if none or unreadable. */
+export async function loadReportedLoans(db: Db, phone: string): Promise<{ label: string; owed?: number; aprPercent?: number; monthlyPayment?: number }[]> {
+  try {
+    const r = await db.query<{ value: any }>(
+      `SELECT value FROM memory_facts WHERE user_phone = $1 AND key LIKE 'loan:%' ORDER BY updated_sim_at`,
+      [phone],
+    );
+    return r.rows.map((x) => (typeof x.value === "string" ? JSON.parse(x.value) : x.value)).filter((v) => v && typeof v.label === "string");
+  } catch {
+    return [];
+  }
+}
+
 /** Login codes show on the projector as ••••••. */
 export const hideCodes = (text: string) => text.replace(/(Huddle code is )\d{6}/, "$1••••••");
 

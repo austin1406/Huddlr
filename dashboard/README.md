@@ -56,6 +56,14 @@ built from P1's numbers (no AI, so every number is exact). Under the table: your
 - **Where this is heading** (replaces the old "Next 6 weeks" chart): every account over a window the user picks (a number plus days, weeks, months or years, or a preset: 1 month, 6 months, 1 year, 5 years, 10 years; up to 10 years). A plain sentence says where net worth goes if nothing changes; a chart shows the current course and, with the toggle on, the Coach's plan; milestone chips show when the card and loan are paid off; tiles show net worth, interest paid and the emergency fund; a table shows where each account ends up; "What this assumes" lists every assumption. Drag across the chart to read any date.
   The page calls `POST /me/<token>/api/project` (same login), which calls P1's `POST /tools/project`. In sample mode (`DASHBOARD_FIXTURE=1`, or finance unreachable) it serves `contracts/fixtures/projection.fixture.json`, which only has the presets, so a custom window shows the closest preset and says so. The fixture is checked against the engine by a test in `finance/` (regenerate with `cd finance && npx tsx scripts/gen-projection-fixture.ts`).
 
+### Who sits at the table
+
+- **One seat per account**, evenly spaced: what you have on the left, what you owe on the right.
+- **Every loan sits with one 🧾 Loan person**: the bank's car loan, any other `*_loan` account, and loans the user
+  told the chat about (P2 keeps them in `memory_facts` as `loan:<name>`). The seat shows the total; tapping it lists
+  each loan. Loans told by text are marked as not in the bank data (so not in the forecast).
+- The team dashboard's account cards follow the same rule (one Loan card with the breakdown).
+
 ### Signing in
 
 Getting in needs **the link and the phone**:

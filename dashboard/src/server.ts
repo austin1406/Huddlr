@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import pg from "pg";
-import { loadChat, loadFacts, loadOutboxStats, loadProjection, loadProposals, maskPhone, parseWindow, type Db } from "./state.js";
+import { loadChat, loadFacts, loadOutboxStats, loadProjection, loadProposals, loadReportedLoans, maskPhone, parseWindow, type Db } from "./state.js";
 import { loadSim, runControl, type ControlDeps } from "./control.js";
 import { cancelOlderLinks, checkCode, endSession, linksValidFrom, migrateAuth, newCode, newSession, queueCode, sessionPhone, SESSION_TTL_MS } from "./auth.js";
 import { buildHuddle, decide, parseDecision, signLink, understand, verifyLink, type Decision } from "./huddle.js";
@@ -127,7 +127,7 @@ app.get("/me/:token/api", async (c) => {
   const agent = db
     ? await db.query<{ agent_handle: string | null }>(`SELECT agent_handle FROM p3_photon_spaces WHERE user_phone = $1`, [g.phone]).catch(() => ({ rows: [] }))
     : { rows: [] };
-  return c.json({ huddle: buildHuddle(facts, cast), source, agentHandle: agent.rows[0]?.agent_handle ?? null });
+  return c.json({ huddle: buildHuddle(facts, cast, { reportedLoans: db ? await loadReportedLoans(db, g.phone) : [] }), source, agentHandle: agent.rows[0]?.agent_handle ?? null });
 });
 
 // "Where this is heading": every account over a window the person picks. The numbers come from P1's projection.
@@ -158,7 +158,7 @@ app.post("/me/:token/api/decide", async (c) => {
   const d = parseDecision(await c.req.json().catch(() => null));
   if (!d) return c.json({ error: "bad decision" }, 400);
   const { facts } = await loadFacts(env.financeUrl, env.secret, env.fixture);
-  return c.json(await decide(facts, d, whatIf));
+  return c.json(await decide(facts, d, whatIf, { reportedLoans: db ? await loadReportedLoans(db, g.phone) : [] }));
 });
 
 // Typed "what if…" questions. Gemini only decides which decision it is; the numbers come from decide().
@@ -203,7 +203,7 @@ app.post("/me/:token/api/ask", async (c) => {
   const { decision, by } = await understand(text, facts.localDate, askGemini);
   console.log(`[huddle] ask ${JSON.stringify(text)} -> ${JSON.stringify(decision)} (${by})`);
   if (!decision) return c.json({ understood: false, by });
-  return c.json({ understood: true, by, decision: decision as Decision, result: await decide(facts, decision, whatIf) });
+  return c.json({ understood: true, by, decision: decision as Decision, result: await decide(facts, decision, whatIf, { reportedLoans: db ? await loadReportedLoans(db, g.phone) : [] }) });
 });
 
 // For the agents service (P2): a fresh link for the welcome text or when the user asks for it.
@@ -224,14 +224,15 @@ else console.warn("[dashboard] DASHBOARD_PASSWORD not set: dashboard is public")
 app.get("/", (c) => c.html(page()));
 
 app.get("/api/state", async (c) => {
-  const [{ facts, source }, chat, outbox, proposals, sim] = await Promise.all([
+  const [{ facts, source }, chat, outbox, proposals, sim, reportedLoans] = await Promise.all([
     loadFacts(env.financeUrl, env.secret, env.fixture),
     db && env.demoPhone ? loadChat(db, env.demoPhone).catch(() => []) : Promise.resolve([]),
     db ? loadOutboxStats(db).catch(() => null) : Promise.resolve(null),
     db && env.demoPhone ? loadProposals(db, env.demoPhone).catch(() => []) : Promise.resolve([]),
     env.fixture ? Promise.resolve(null) : loadSim(control),
+    db && env.demoPhone ? loadReportedLoans(db, env.demoPhone) : Promise.resolve([]),
   ]);
-  return c.json({ facts, source, chat, outbox, proposals, sim: sim?.sim ?? null, user: env.demoPhone ? maskPhone(env.demoPhone) : null });
+  return c.json({ facts, source, chat, outbox, proposals, sim: sim?.sim ?? null, reportedLoans, user: env.demoPhone ? maskPhone(env.demoPhone) : null });
 });
 
 // Behind the dashboard login: open the demo user's Huddle already signed in (the team is logged in here).

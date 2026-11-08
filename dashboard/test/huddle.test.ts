@@ -133,3 +133,24 @@ test("paying the car loan points out the card saves more", async () => {
   const r = await decide(facts(), { kind: "pay_car", amount: 20 }, noWhatIf);
   assert.match(r.reactions.find((x) => x.id === "card")!.text, /24% vs 6\.9%/);
 });
+
+test("every loan sits with one Loan person", () => {
+  const f = facts();
+  f.accounts.push({ id: "student", kind: "student_loan", name: "Student loan", characterId: "car_loan", balance: 8000 });
+  const h = buildHuddle(f, cast, { reportedLoans: [{ label: "tuition", owed: 10000, aprPercent: 5 }] });
+  const loan = h.people.find((p) => p.id === "car_loan")!;
+  assert.equal(loan.name, cast.find((c: any) => c.id === "car_loan").name);
+  assert.equal(loan.balance, 14500 + 8000 + 10000);
+  assert.match(loan.says, /across 3 loans/);
+  assert.ok(loan.detail.some((r) => r.label === "Tuition" && r.note?.includes("you told us by text")));
+  assert.equal(h.people.length, 5); // no extra seat for the student loan
+  assert.equal(h.owe, 2400 + 32500);
+});
+
+test("paying the car loan shows the change on the whole Loan total", async () => {
+  const r = await decide(facts(), { kind: "pay_car", amount: 500 }, noWhatIf, { reportedLoans: [{ label: "tuition", owed: 10000 }] });
+  const loan = r.reactions.find((x) => x.id === "car_loan")!;
+  assert.equal(loan.before, "$24,500");
+  assert.equal(loan.after, "$24,000");
+  assert.match(loan.text, /car loan drops to \$14,000/);
+});
