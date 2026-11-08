@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { SimClock, localDate, type AccountId, type FactsSnapshot, type FinanceEvent, type Persona, type Scenario, type SimStateStore } from "../../../contracts/src";
 import type { AdminState, Backend, BillOp, EngineOps, PurchaseOp } from "../backend";
 import type { ScenarioName } from "../env";
-import type { ProposalGateway } from "../proposals";
+import { findMatchingProposal, type ProposalGateway } from "../proposals";
 import { canIAfford } from "./afford";
 import { addDays, r2 } from "./calendar";
 import { EventLog, detectEvents } from "./events";
@@ -102,9 +102,60 @@ export class EngineBackend implements Backend, EngineOps {
     settleThrough(this.ledger, persona, today);
     const bare = buildFacts(this.ledger, persona, now);
     let changed = false;
-    for (const e of detectEvents(this.ledger, persona, bare)) changed = this.log.add(e) || changed;
+    for (const e of detectEvents(this.ledger, persona, bare)) {
+      if (this.log.has(e.id)) continue;
+      if (e.type === "user_transfer_seen") {
+        const matched = await this.watchTransfer(String(e.data.txnId));
+        e.data.matchedProposalId = matched ?? null;
+      }
+      this.log.add(e);
+      changed = true;
+    }
+    changed = (await this.retryUnresolvedTransfers()) || changed;
     if (changed) this.save();
     return { now, today, facts: { ...bare, recentEvents: this.log.recent(5) } };
+  }
+
+  /**
+   * The transfer watcher. A transfer the user made that fulfils an open proposal (same accounts, at least the
+   * amount) is reported to the agents service, which marks the proposal completed and has the Coach close the loop.
+   * Returns the proposal id, null when nothing matched, or undefined when the agents service could not be asked
+   * (the transfer stays unresolved and is retried).
+   */
+  private async watchTransfer(txnId: string): Promise<string | null | undefined> {
+    const txn = this.ledger.txns.find((t) => t.id === txnId);
+    const done = (this.ledger.completed ??= {});
+    if (!txn || !txn.from || !txn.to) return null;
+    if (done[txnId] !== undefined) return done[txnId];
+    try {
+      const match = findMatchingProposal({ from: txn.from, to: txn.to, amount: txn.amount }, await this.o.gateway.open());
+      const completed = match ? await this.o.gateway.complete(match.id, txn.id) : false;
+      done[txnId] = match && completed ? match.id : null;
+      return done[txnId];
+    } catch (err) {
+      console.warn(`[finance] transfer ${txnId} not matched yet, will retry: ${(err as Error).message}`);
+      return undefined;
+    }
+  }
+
+  private lastRetryAt = 0;
+
+  /** Transfers the watcher could not resolve are tried again, at most every 15 real seconds. */
+  private async retryUnresolvedTransfers(): Promise<boolean> {
+    const done = (this.ledger.completed ??= {});
+    const waiting = this.ledger.txns.filter((t) => t.kind === "transfer" && done[t.id] === undefined && this.log.has(`evt_user_transfer_seen_${t.id}`));
+    const realNow = (this.o.realNow ?? Date.now)();
+    if (waiting.length === 0 || realNow - this.lastRetryAt < 15_000) return false;
+    this.lastRetryAt = realNow;
+    let changed = false;
+    for (const t of waiting) {
+      const matched = await this.watchTransfer(t.id);
+      if (matched === undefined) continue;
+      const event = this.log.get(`evt_user_transfer_seen_${t.id}`);
+      if (event) event.data.matchedProposalId = matched;
+      changed = true;
+    }
+    return changed;
   }
 
   /** Runs `fn` with the ledger caught up, then saves and re-detects so a change shows up as events immediately. */

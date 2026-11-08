@@ -195,6 +195,12 @@ test("pending proposals and accept are forwarded to the agents gateway", async (
       calls.push(`${id}:${via}`);
       return { ok: true, status: "accepted", reason: null, message: "ok" };
     },
+    async open() {
+      return [proposal];
+    },
+    async complete() {
+      return false;
+    },
   };
   const { post, get } = await setup({ gateway });
   const facts = FactsSnapshot.parse(await (await get("/facts")).json());
