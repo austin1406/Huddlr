@@ -79,3 +79,30 @@ test("@loan afterwards knows about the tuition loan, and the summary lists it", 
   assert.match(s, /🧾 Student loan: \$10,000\.00 owed at 5%, \$150\.00 a month .* \(you told me about this one\)\./);
   assert.match(s, /All loans together: \$24,500\.00 owed\./);
 });
+
+test("phone test: 'what do i do if i want to take out a tuition loan' never gets the loan's status line", async () => {
+  // A model whose every answer is rejected (it invents a number), so the fallback is what gets sent.
+  const db = new PGlite();
+  await migrate(db);
+  const app = createApp({ secret: "", state: new StubState("normal") });
+  const finance = financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch);
+  const now = new Date((await finance.facts()).asOf);
+  const prompts: string[] = [];
+  let n = 0;
+  const chat = async (text: string, model: (p: string) => Promise<string>) => {
+    const id = Number((await db.query<{ id: number }>(
+      "INSERT INTO inbound_messages (provider_msg_id, user_phone, text, received_sim_at) VALUES ($1, $2, $3, $4) RETURNING id", [`m${++n}`, PHONE, text, now],
+    )).rows[0].id);
+    return handleChat({ db, facts: () => finance.facts(), userPhone: PHONE, finance, model }, { id, text }, now);
+  };
+  await chat("I have a $10k student loan at 5%, $150 a month", async () => "unused");
+
+  const r = await chat("what do i do if i want to take out a tuition loan", async (p) => { prompts.push(p); return "Borrow $9,999.99 today."; });
+  assert.equal(r.responder, "car_loan");
+  assert.equal(r.source, "template");
+  assert.match(r.why ?? "", /9,999\.99/, "the log says why the fallback was used");
+  const sent = (await db.query<{ text: string }>("SELECT text FROM outbox ORDER BY id DESC LIMIT 1")).rows[0].text;
+  assert.match(sent, /^Before you sign, check three things: how much you'd borrow, the interest rate, and the monthly payment\. Then make sure that payment fits: Right now you have \$437\.50 safe to spend until payday on Nov 20, and your current loan already takes \$320\.00 a month\. Text me the amount, rate and payment and I'll break it down\.$/);
+  assert.doesNotMatch(sent, /left at 6\.9%|paid off around/, "not the loan's status line");
+  assert.doesNotMatch(prompts[0], /Include \$24,500\.00/, "the all-loans total isn't required for this question");
+});
