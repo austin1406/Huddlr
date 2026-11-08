@@ -131,3 +131,33 @@ test("'so what should i do' with the roundtable: every account in the plan gives
   assert.match(prompts[0], /Give the user your option/);
   assert.equal((await proposals.getPending(PHONE))?.status, "pending", "options never approve anything");
 });
+
+test("phone test: 'what do i do if i want to take out a tuition loan?' is answered by Loan, not the waiting plan's bottom line", async () => {
+  for (const t of ["so what should i do", "what do i do", "ok so what now?", "which one should i pick"]) assert.equal(isBottomLineQuestion(t), true, t);
+  for (const t of ["what do i do if i want to take out a tuition loan?", "what should i do about my card", "what should i do with my bonus", "so what about savings"])
+    assert.equal(isBottomLineQuestion(t), false, t);
+
+  const { runOptions } = await import("../src/debate");
+  const db = new PGlite();
+  await migrate(db);
+  const f = await finance();
+  const now = new Date((await f.facts()).asOf);
+  const proposals = makeProposalService(db, () => now);
+  await proposals.create({ userPhone: PHONE, plan: paycheckPlan, from: "checking", to: "ira", amount: 150, actionText: "Move $150.00 from Checking to IRA", sourceEventId: "evt_paycheck_landed_x" });
+  const text = "what do i do if i want to take out a tuition loan?";
+  const id = Number((await db.query<{ id: number }>("INSERT INTO inbound_messages (provider_msg_id, user_phone, text, received_sim_at) VALUES ('a', $1, $2, $3) RETURNING id", [PHONE, text, now])).rows[0].id);
+  assert.equal((await handleInbound(db, proposals, { id, user_phone: PHONE, text }, now)).kind, "chat");
+  const prompts: string[] = [];
+  const model = async (p: string) => { prompts.push(p); return "Check the amount, the interest rate and the monthly payment first, and make sure it fits next to your $437.50 safe to spend."; };
+  const r = await handleChat({
+    db, facts: () => f.facts(), userPhone: PHONE, finance: f, proposals, model,
+    options: (ask, t) => runOptions({ db, finance: f, proposals, userPhone: PHONE, model }, ask, t),
+  }, { id, text }, now);
+  assert.equal(r.responder, "car_loan");
+  assert.equal(r.debate, undefined, "no options roundtable about the paycheck plan");
+  assert.match(prompts.at(-1)!, /They're thinking about taking out a new loan\. Answer that question, not anything else/);
+  assert.match(prompts.at(-1)!, /SAFE TO SPEND UNTIL PAYDAY: \$437\.50/);
+  const out = (await db.query<{ speaker: string; text: string }>("SELECT speaker, text FROM outbox ORDER BY id")).rows;
+  assert.deepEqual(out.map((o) => o.speaker), ["car_loan"]);
+  assert.match(out[0].text, /\$437\.50 safe to spend/, "the real number passes the checker");
+});

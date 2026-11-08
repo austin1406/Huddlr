@@ -15,8 +15,17 @@ export type HandleResult =
   | { kind: "accepted" | "declined" | "expired" | "clarify" | "noop"; proposalId: number };
 
 /** "so what should i do", "what now", "what's the bottom line", "tldr", "i don't know what to do". */
-export const isBottomLineQuestion = (text: string) =>
-  /\b(what (?:should|do|can) i (?:do|pick|choose)|what(?:'s| is)? (?:the )?(?:bottom line|move|play|takeaway|plan)|what now|now what|so what\b(?! about)|tl;?dr|bottom line|what do you (?:want|need) me to do|(?:don'?t|dont) know what to do|which (?:one|should i))\b/i.test(text);
+/**
+ * Only a plain ask for the bottom line counts: the phrase plus filler, nothing else. "What do I do if I want to take
+ * out a tuition loan?" is a real question about something else and goes to the character it's about (phone testing:
+ * it got the waiting paycheck plan's bottom line instead).
+ */
+export const isBottomLineQuestion = (text: string) => {
+  const t = text.toLowerCase().replace(/[’']/g, "'").replace(/[?!.,]+/g, " ").replace(/\s+/g, " ").trim();
+  const filler = String.raw`(?:so|ok|okay|then|hmm+|um+|well|and|but|now|here|next|today|about (?:it|this|that)|with (?:it|this|that)|exactly|again|pls|please|bro|lol|then what)`;
+  const core = String.raw`(?:what (?:should|do|can|would) i (?:do|pick|choose)|what(?:'s| is)? (?:the )?(?:bottom line|move|play|takeaway|plan)|what now|now what|so what|tl;?dr|bottom line|what do you (?:want|need) me to do|i (?:don'?t|dont) know what to do|which (?:one|should i (?:do|pick|choose))(?: should i (?:do|pick|choose))?|what would you do)`;
+  return new RegExp(String.raw`^(?:${filler} )*${core}(?: ${filler})*$`).test(t);
+};
 
 /**
  * Short texts with a pending plan are treated as answers to it ("maybe", "ok wait"); longer ones are conversation.
