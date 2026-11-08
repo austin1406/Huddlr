@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Huddlr · under the hood</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #13161e; --panel-2: #1a1e28; --line: #262b38;
+    --text: #e8eaf0; --muted: #8a91a3; --faint: #5b6273;
+    --good: #3ecf8e; --watch: #f5b942; --concern: #f2555a; --accent: #6c8cff;
+    --user: #2f6bff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 16px; height: 100vh; }
+  .main { display: flex; flex-direction: column; gap: 16px; min-width: 0; overflow: auto; }
+  .side { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header .title { font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+  header .title span { color: var(--muted); font-weight: 500; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.live { color: var(--good); border-color: #1f4d3a; }
+  .chip.fixture { color: var(--watch); border-color: #5a4417; }
+  .chip.bad { color: var(--concern); border-color: #5a2224; }
+  .spacer { flex: 1; }
+
+  .accounts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .acct { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
+  .acct .n { color: var(--muted); font-size: 12px; }
+  .acct .v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .acct .s { color: var(--faint); font-size: 11px; }
+
+  .gauges { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .gauge { background: var(--panel-2); border-radius: 12px; padding: 10px 10px 12px; text-align: center; }
+  .gauge svg { width: 100%; max-width: 150px; display: block; margin: 0 auto; }
+  .gauge .val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: -14px; }
+  .gauge .lab { font-size: 12.5px; color: var(--text); margin-top: 6px; }
+  .gauge .thr { font-size: 11px; color: var(--faint); margin-top: 2px; }
+  .gauge .who { font-size: 11px; color: var(--muted); }
+  .st-good { color: var(--good); } .st-watch { color: var(--watch); } .st-concern { color: var(--concern); }
+
+  .fc-head { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
+  .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .stat .v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #chart { width: 100%; height: auto; display: block; }
+
+  .row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .list { display: flex; flex-direction: column; gap: 6px; max-height: 210px; overflow: auto; }
+  .item { display: flex; gap: 10px; align-items: baseline; background: var(--panel-2); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+  .item .t { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; min-width: 64px; }
+  .item .x { flex: 1; min-width: 0; }
+  .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.pending { color: var(--watch); border-color: #5a4417; }
+  .pill.accepted, .pill.completed { color: var(--good); border-color: #1f4d3a; }
+  .pill.declined, .pill.expired { color: var(--faint); }
+  .sev-high { color: var(--concern); } .sev-medium { color: var(--watch); } .sev-low { color: var(--muted); }
+  .empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
+
+  .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .chat .who { display: flex; justify-content: space-between; align-items: center; }
+  #msgs { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 2px 8px; }
+  .bubble { max-width: 86%; padding: 8px 12px; border-radius: 18px; font-size: 14px; white-space: pre-wrap; word-wrap: break-word; }
+  .bubble.in { align-self: flex-end; background: var(--user); color: #fff; border-bottom-right-radius: 6px; }
+  .bubble.out { align-self: flex-start; background: #2a2f3b; border-bottom-left-radius: 6px; }
+  .bubble .sp { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; font-weight: 600; }
+  .bubble.held, .bubble.pending, .bubble.sending { opacity: .55; }
+  .bubble.failed { outline: 1px solid var(--concern); }
+  .meta { font-size: 10.5px; color: var(--faint); align-self: center; margin: 4px 0 0; }
+
+  @media (max-width: 1100px) {
+    .wrap { grid-template-columns: 1fr; height: auto; }
+    .accounts, .gauges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .row2 { grid-template-columns: 1fr; }
+    .chat { height: 70vh; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="main">
+    <header class="panel">
+      <div class="title">Huddlr <span>· under the hood</span></div>
+      <div class="chip" id="who">—</div>
+      <div class="chip" id="clock">—</div>
+      <div class="spacer"></div>
+      <div class="chip" id="queue">queue —</div>
+      <div class="chip" id="source">—</div>
+    </header>
+
+    <section class="panel">
+      <h2>Accounts</h2>
+      <div class="accounts" id="accounts"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Health indicators</h2>
+      <div class="gauges" id="gauges"></div>
+    </section>
+
+    <section class="panel">
+      <h2>45-day forecast · checking</h2>
+      <div class="fc-head" id="fcstats"></div>
+      <svg id="chart" viewBox="0 0 900 260" preserveAspectRatio="none" role="img" aria-label="45-day balance forecast"></svg>
+    </section>
+
+    <div class="row2">
+      <section class="panel">
+        <h2>Proposals</h2>
+        <div class="list" id="proposals"></div>
+      </section>
+      <section class="panel">
+        <h2>Event log</h2>
+        <div class="list" id="events"></div>
+      </section>
+    </div>
+  </div>
+
+  <aside class="side">
+    <section class="panel chat">
+      <div class="who"><h2>iMessage thread</h2><span class="chip" id="chatuser">—</span></div>
+      <div id="msgs"></div>
+    </section>
+  </aside>
+</div>
+
+<script>
+const CAST = {
+  checking: ["🏦", "Checking"], savings: ["🐷", "Savings"], card: ["💳", "Card"],
+  car_loan: ["🚗", "Car Loan"], ira: ["📈", "IRA"], coach: ["🧭", "Coach"], system: ["⚙️", "System"],
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const money = (n, d = 0) => (n < 0 ? "−$" : "$") + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+let tz = "America/Chicago";
+const dateFmt = (iso, opts) => new Date(iso).toLocaleString("en-US", { timeZone: tz, ...opts });
+const day = (d) => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+function renderHeader(s) {
+  const f = s.facts;
+  tz = f.timezone || tz;
+  $("who").innerHTML = `customer <b>${esc(f.customer?.firstName)}</b>`;
+  $("clock").innerHTML = `sim time <b>${esc(dateFmt(f.asOf, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</b>`;
+  const live = s.source === "live";
+  $("source").className = "chip " + (live ? "live" : "fixture");
+  $("source").textContent = live ? "● live data" : "● " + s.source;
+  const q = s.outbox;
+  if (q) {
+    const bad = q.failed > 0;
+    $("queue").className = "chip" + (bad ? " bad" : "");
+    $("queue").innerHTML = `sent <b>${q.sent}</b> · waiting <b>${q.pending + q.sending}</b> · held <b>${q.held}</b>` + (bad ? ` · failed <b>${q.failed}</b>` : "");
+  } else $("queue").textContent = "queue: no database";
+  $("chatuser").textContent = s.user ? "demo user " + s.user : "no demo user";
+}
+
+function renderAccounts(f) {
+  $("accounts").innerHTML = f.accounts.map((a) => {
+    const owed = a.kind === "credit_card" || a.kind === "car_loan";
+    const sub = a.kind === "credit_card" && a.limit ? `owed · ${a.aprPercent}% APR · limit ${money(a.limit)}`
+      : a.kind === "car_loan" ? `owed${a.monthlyPayment ? " · " + money(a.monthlyPayment) + "/mo" : ""}`
+      : a.kind === "ira" ? `retirement${a.simulated ? " · simulated" : ""}` : "balance";
+    const [emo] = CAST[a.characterId] || ["•"];
+    return `<div class="acct"><div class="n">${emo} ${esc(a.name)}</div><div class="v">${money(a.balance, owed ? 0 : 2)}</div><div class="s">${esc(sub)}</div></div>`;
+  }).join("");
+}
+
+function fmtInd(i) {
+  if (i.unit === "percent") return i.value.toFixed(i.value < 10 ? 1 : 0) + "%";
+  if (i.unit === "months") return i.value.toFixed(i.value < 10 ? 1 : 0) + " mo";
+  return String(Math.round(i.value));
+}
+function unitTxt(i, v) { return i.unit === "percent" ? v + "%" : i.unit === "months" ? v + " mo" : String(v); }
+
+function gaugeSvg(i) {
+  // Scale: percent 0-100, otherwise up to 1.5x the "good" threshold (or the value, whichever is larger).
+  const max = i.unit === "percent" ? 100 : Math.max(i.goodAt * 1.5, i.value, 1);
+  const p = Math.max(0, Math.min(1, i.value / max));
+  const R = 52, cx = 70, cy = 66, len = Math.PI * R;
+  const arc = `M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`;
+  const color = `var(--${i.status})`;
+  // threshold ticks
+  const tick = (v, col) => {
+    const a = Math.PI * (1 - Math.max(0, Math.min(1, v / max)));
+    const x1 = cx + (R - 9) * Math.cos(a), y1 = cy - (R - 9) * Math.sin(a);
+    const x2 = cx + (R + 9) * Math.cos(a), y2 = cy - (R + 9) * Math.sin(a);
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${col}" stroke-width="2" stroke-linecap="round"/>`;
+  };
+  return `<svg viewBox="0 0 140 76" aria-hidden="true">
+    <path d="${arc}" fill="none" stroke="#2a2f3b" stroke-width="12" stroke-linecap="round"/>
+    <path d="${arc}" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${len * p} ${len}"/>
+    ${tick(i.goodAt, "var(--good)")}${tick(i.concernAt, "var(--concern)")}
+  </svg>`;
+}
+
+function renderGauges(f) {
+  $("gauges").innerHTML = f.indicators.map((i) => {
+    const thr = i.direction === "higher_is_better"
+      ? `good ≥ ${unitTxt(i, i.goodAt)} · concern &lt; ${unitTxt(i, i.concernAt)}`
+      : `good &lt; ${unitTxt(i, i.goodAt)} · concern ≥ ${unitTxt(i, i.concernAt)}`;
+    const [emo, name] = CAST[i.ownerCharacter] || ["", ""];
+    return `<div class="gauge">${gaugeSvg(i)}
+      <div class="val st-${i.status}">${fmtInd(i)}</div>
+      <div class="lab">${esc(i.label)}</div>
+      <div class="thr">${thr}</div>
+      <div class="who">${emo} ${esc(name)}</div></div>`;
+  }).join("");
+}
+
+function renderForecast(f) {
+  const fc = f.forecast;
+  const short = f.shortfall;
+  $("fcstats").innerHTML = [
+    ["Safe to spend until payday", money(fc.safeToSpendUntilPayday), fc.safeToSpendUntilPayday < 0 ? "st-concern" : ""],
+    ["Lowest point", `${money(fc.lowest.balance)} · ${day(fc.lowest.date)}`, fc.lowest.balance < 0 ? "st-concern" : fc.lowest.balance < fc.cushion ? "st-watch" : ""],
+    ["Next payday", day(fc.nextPayday), ""],
+    ["First negative day", fc.firstNegativeDate ? day(fc.firstNegativeDate) : "none", fc.firstNegativeDate ? "st-concern" : "st-good"],
+    ...(short ? [["Shortfall", `${money(short.amount)} · move ${money(short.suggestedTransfer)}${short.within48Hours ? " · <48h" : ""}`, "st-concern"]] : []),
+  ].map(([k, v, c]) => `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join("");
+
+  const W = 900, H = 260, L = 58, Rp = 12, T = 14, B = 34;
+  const days = fc.days, n = days.length;
+  const vals = days.map((d) => d.balance);
+  let lo = Math.min(0, ...vals, fc.cushion), hi = Math.max(...vals, fc.cushion);
+  const pad = (hi - lo) * 0.08 || 50; lo -= pad; hi += pad;
+  const x = (i) => L + (i / (n - 1)) * (W - L - Rp);
+  const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const idx = (d) => days.findIndex((p) => p.date === d);
+
+  // y grid: 4-5 round steps
+  const raw = (hi - lo) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw))), step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  let grid = "";
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step)
+    grid += `<line x1="${L}" x2="${W - Rp}" y1="${y(v)}" y2="${y(v)}" stroke="#20242f"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#5b6273">${money(v)}</text>`;
+
+  // paydays and bills
+  let marks = "";
+  for (const p of f.upcomingPaychecks || []) {
+    const i = idx(p.date); if (i < 0) continue;
+    const nearEnd = x(i) > W - 120;
+    marks += `<line x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${H - B}" stroke="#2c5d47" stroke-dasharray="3 4"/><text x="${x(i) + (nearEnd ? -4 : 4)}" y="${T + 10}" text-anchor="${nearEnd ? "end" : "start"}" font-size="10.5" fill="#3ecf8e">payday +${money(p.amount)}</text>`;
+  }
+  for (const b of f.upcomingBills || []) {
+    const i = idx(b.dueDate); if (i < 0) continue;
+    marks += `<g><title>${esc(b.label)} ${money(b.amount)} · ${day(b.dueDate)}</title><circle cx="${x(i)}" cy="${H - B + 9}" r="3.5" fill="#f5b942"/></g>`;
+  }
+  // x labels weekly
+  let xl = "";
+  for (let i = 0; i < n; i += 7) xl += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#5b6273">${day(days[i].date)}</text>`;
+
+  const line = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(n - 1)} ${y(Math.max(lo, 0))} L${x(0)} ${y(Math.max(lo, 0))} Z`;
+  const li = idx(fc.lowest.date), ni = fc.firstNegativeDate ? idx(fc.firstNegativeDate) : -1;
+
+  $("chart").innerHTML = `
+    <defs>
+      <linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#6c8cff" stop-opacity=".35"/><stop offset="1" stop-color="#6c8cff" stop-opacity="0"/></linearGradient>
+      <clipPath id="below"><rect x="0" y="${y(0)}" width="${W}" height="${H}"/></clipPath>
+    </defs>
+    ${grid}${marks}
+    <line x1="${L}" x2="${W - Rp}" y1="${y(fc.cushion)}" y2="${y(fc.cushion)}" stroke="#f5b942" stroke-dasharray="6 5" opacity=".7"/>
+    <text x="${W - Rp}" y="${y(fc.cushion) - 5}" text-anchor="end" font-size="10.5" fill="#f5b942">cushion ${money(fc.cushion)}</text>
+    <line x1="${L}" x2="${W - Rp}" y1="${y(0)}" y2="${y(0)}" stroke="#f2555a" opacity=".6"/>
+    <path d="${area}" fill="url(#g)"/>
+    <path d="${line}" fill="none" stroke="#6c8cff" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="${line}" fill="none" stroke="#f2555a" stroke-width="2.5" clip-path="url(#below)"/>
+    ${li >= 0 ? `<circle cx="${x(li)}" cy="${y(fc.lowest.balance)}" r="5" fill="#0b0d12" stroke="${fc.lowest.balance < 0 ? "#f2555a" : "#f5b942"}" stroke-width="2.5"/>
+      <text x="${x(li)}" y="${y(fc.lowest.balance) + (y(fc.lowest.balance) > H - B - 24 ? -10 : 18)}" text-anchor="middle" font-size="11" fill="#e8eaf0">lowest ${money(fc.lowest.balance)}</text>` : ""}
+    ${ni >= 0 ? `<line x1="${x(ni)}" x2="${x(ni)}" y1="${T}" y2="${H - B}" stroke="#f2555a" stroke-width="1.5"/><text x="${x(ni) + 4}" y="${T + 24}" font-size="10.5" fill="#f2555a">first negative</text>` : ""}
+    ${xl}`;
+}
+
+function renderProposals(s) {
+  const list = s.proposals?.length ? s.proposals : (s.facts.pendingProposals || []).map((p) => ({ ...p, id: p.id }));
+  $("proposals").innerHTML = list.length ? list.map((p) =>
+    `<div class="item"><span class="pill ${p.status}">${p.status}</span><span class="x">${esc(p.actionText)}</span>${p.channel ? `<span class="t">via ${p.channel}</span>` : ""}</div>`
+  ).join("") : `<div class="empty">No proposals yet. The Coach proposes; only the user moves money.</div>`;
+}
+
+const EVT = {
+  big_purchase: (e) => `Big purchase ${e.data?.merchant ? "at " + esc(e.data.merchant) : ""} ${e.data?.amount != null ? money(e.data.amount, 2) : ""}`,
+  paycheck_landed: (e) => `Paycheck landed ${e.data?.amount != null ? money(e.data.amount, 2) : ""}`,
+  bill_due_soon: (e) => `Bill due soon ${e.data?.label ? "· " + esc(e.data.label) : ""} ${e.data?.amount != null ? money(e.data.amount, 2) : ""}`,
+  forecast_problem: (e) => `Forecast problem ${e.data?.amount != null ? "· short " + money(e.data.amount) : ""}`,
+  user_transfer_seen: (e) => `User moved money ${e.data?.amount != null ? money(e.data.amount, 2) : ""}`,
+};
+function renderEvents(f) {
+  const ev = [...(f.recentEvents || [])].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  $("events").innerHTML = ev.length ? ev.map((e) =>
+    `<div class="item"><span class="t">${esc(dateFmt(e.occurredAt, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</span><span class="x sev-${e.severity}">${(EVT[e.type] || ((x) => esc(x.type)))(e)}</span></div>`
+  ).join("") : `<div class="empty">No events yet.</div>`;
+}
+
+let lastChat = "";
+function renderChat(chat) {
+  const key = JSON.stringify(chat);
+  if (key === lastChat) return;
+  lastChat = key;
+  const box = $("msgs");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = chat.length ? chat.map((m) => {
+    if (m.from === "user") return `<div class="bubble in">${m.photo && !m.text ? "📷 photo" : esc(m.text)}</div>`;
+    const [emo, name] = CAST[m.from] || ["", m.from];
+    const st = m.status && m.status !== "sent" ? m.status : "";
+    return `<div class="bubble out ${st}"><span class="sp">${emo} ${esc(name)}${st ? " · " + st : ""}</span>${esc(m.text)}</div>`;
+  }).join("") : `<div class="empty">No messages yet. Text the agent to start.</div>`;
+  if (atBottom || chat.length < 8) box.scrollTop = box.scrollHeight;
+}
+
+async function tick() {
+  try {
+    const s = await (await fetch("/api/state", { cache: "no-store" })).json();
+    renderHeader(s); renderAccounts(s.facts); renderGauges(s.facts); renderForecast(s.facts);
+    renderProposals(s); renderEvents(s.facts); renderChat(s.chat || []);
+  } catch (e) {
+    $("source").className = "chip bad"; $("source").textContent = "● dashboard offline";
+  }
+}
+tick();
+setInterval(tick, 2500);
+</script>
+</body>
+</html>
