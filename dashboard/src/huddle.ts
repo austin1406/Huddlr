@@ -7,7 +7,6 @@
  * on the same snapshot (what-if does not model transfers).
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { ACCOUNT_TYPES, type UserAccount } from "./accounts.js";
 
 type Status = "good" | "watch" | "concern";
 export type Mood = "happy" | "okay" | "worried";
@@ -26,12 +25,6 @@ export type Person = {
   /** Detail rows for the tap-to-open sheet. */
   detail: { label: string; value: string; note?: string }[];
   upcoming: { date: string; label: string; amount: number; sign: "+" | "-" }[];
-  /** Added by the user on this page: what the edit form needs. */
-  added?: { key: string; type: string; name: string; balance: number; aprPercent?: number; monthlyPayment?: number; until?: string };
-  /** Loan seat only: loans the user added or told the chat about, which they can remove here. */
-  ownLoans?: { key: string; label: string; via: "huddle" | "text" }[];
-  /** "Looks"/tint for the face: the account type for added accounts. */
-  look?: string;
 };
 
 export type Huddle = {
@@ -88,7 +81,7 @@ const DEFAULT_LOOK: Record<string, { name: string; emoji: string }> = {
 const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
 
 /** A loan the user told the chat about (P2's memory_facts, key loan:<name>). */
-export type ReportedLoan = { key?: string; label: string; owed?: number; aprPercent?: number; monthlyPayment?: number; addedVia?: string; type?: string };
+export type ReportedLoan = { label: string; owed?: number; aprPercent?: number; monthlyPayment?: number };
 
 function castInfo(cast: any[], id: string) {
   const c = cast.find((x) => x.id === id);
@@ -96,7 +89,7 @@ function castInfo(cast: any[], id: string) {
 }
 
 // ---------- the huddle ----------
-export function buildHuddle(facts: any, cast: any[], extras: { reportedLoans?: ReportedLoan[]; userAccounts?: UserAccount[] } = {}): Huddle {
+export function buildHuddle(facts: any, cast: any[], extras: { reportedLoans?: ReportedLoan[] } = {}): Huddle {
   const acct = (id: string) => facts.accounts.find((a: any) => a.id === id);
   const ind = (id: string) => facts.indicators.find((i: any) => i.id === id);
   const f = facts.forecast;
@@ -233,7 +226,7 @@ export function buildHuddle(facts: any, cast: any[], extras: { reportedLoans?: R
     const loans = [
       ...(car ? [{ label: "Car loan", owed: car.balance, apr: car.aprPercent, monthly: car.monthlyPayment, told: false }] : []),
       ...extraLoans.map((a: any) => ({ label: a.name, owed: a.balance, apr: a.aprPercent, monthly: a.monthlyPayment, told: false })),
-      ...told.map((l) => ({ label: titleCase(l.label), owed: l.owed, apr: l.aprPercent, monthly: l.monthlyPayment, told: true, viaHuddle: l.addedVia === "huddle" })),
+      ...told.map((l) => ({ label: titleCase(l.label), owed: l.owed, apr: l.aprPercent, monthly: l.monthlyPayment, told: true })),
     ];
     const total = roundMoney(loans.reduce((sum, l) => sum + (l.owed ?? 0), 0));
     const many = loans.length > 1;
@@ -252,13 +245,12 @@ export function buildHuddle(facts: any, cast: any[], extras: { reportedLoans?: R
         ...loans.map((l) => ({
           label: many ? l.label : "You owe",
           value: l.owed != null ? money(l.owed) : "amount not given",
-          note: [l.apr != null ? `${l.apr}% interest` : "", l.monthly != null ? `${money(l.monthly)} a month` : "", l.told ? ((l as any).viaHuddle ? "added by you" : "you told us by text") : ""].filter(Boolean).join(", ") || undefined,
+          note: [l.apr != null ? `${l.apr}% interest` : "", l.monthly != null ? `${money(l.monthly)} a month` : "", l.told ? "you told us by text" : ""].filter(Boolean).join(", ") || undefined,
         })),
         ...(bill ? [{ label: "Next car loan payment", value: `${money(bill.amount)} on ${day(bill.dueDate)}` }] : []),
-        ...(told.length ? [{ label: "Loans you added", value: String(told.length), note: "not in your bank data, so not in the forecast" }] : []),
+        ...(told.length ? [{ label: "Loans you told us about", value: String(told.length), note: "not in your bank data, so not in the forecast" }] : []),
       ],
       upcoming: bill ? [{ date: bill.dueDate, label: bill.label, amount: bill.amount, sign: "-" }] : [],
-      ownLoans: told.filter((l) => l.key).map((l) => ({ key: l.key!, label: titleCase(l.label), via: l.addedVia === "huddle" ? "huddle" : "text" })),
     });
   }
 
@@ -292,47 +284,9 @@ export function buildHuddle(facts: any, cast: any[], extras: { reportedLoans?: R
     });
   }
 
-  // Accounts the user added on this page: their own seat, spoken for in the chat by the closest existing agent.
-  for (const a of extras.userAccounts ?? []) {
-    const t = ACCOUNT_TYPES[a.type];
-    if (!t) continue;
-    const speaker = castInfo(cast, t.owner);
-    const rate = a.aprPercent != null ? `${a.aprPercent}%` : null;
-    const owes = t.group === "owe";
-    const says = owes
-      ? `You owe ${money(a.balance)}.${a.monthlyPayment != null ? ` ${money(a.monthlyPayment)} a month.` : ""}${rate ? ` The rate is ${rate}.` : ""}`
-      : a.type === "cd"
-        ? `I hold ${money(a.balance)}${rate ? ` at ${rate}` : ""}${a.until ? `, locked until ${day(a.until)}` : ""}. Taking it out early costs a penalty.`
-        : t.owner === "ira"
-          ? `I hold ${money(a.balance)}. It can go up and down, so it's long-term money.`
-          : `I hold ${money(a.balance)}${rate ? ` earning ${rate}` : ""}.`;
-    people.push({
-      id: a.key,
-      group: t.group,
-      name: a.name,
-      emoji: t.emoji,
-      balance: a.balance,
-      status: "good",
-      mood: "happy",
-      says,
-      detail: [
-        { label: owes ? "You owe" : "Balance", value: money(a.balance) },
-        { label: "Type", value: t.label },
-        ...(rate ? [{ label: "Interest rate", value: rate }] : []),
-        ...(a.monthlyPayment != null ? [{ label: "Monthly payment", value: money(a.monthlyPayment) }] : []),
-        ...(a.until ? [{ label: "Locked until", value: day(a.until) }] : []),
-        { label: "In the chat", value: `${speaker.emoji} ${speaker.name}`, note: `${speaker.name} talks about this account for you` },
-        { label: "Where it's from", value: "Added by you", note: "not in your bank data, so not in the forecast" },
-      ],
-      upcoming: [],
-      added: { key: a.key, type: a.type, name: a.name, balance: a.balance, aprPercent: a.aprPercent, monthlyPayment: a.monthlyPayment, until: a.until },
-      look: `type:${a.type}`,
-    });
-  }
-
-  // Coach: the whole picture and one next move. Accounts the user added don't get a health score.
+  // Coach: the whole picture and one next move.
   const counts: Record<Status, number> = { good: 0, watch: 0, concern: 0 };
-  for (const p of people) if (!p.added) counts[p.status]++;
+  for (const p of people) counts[p.status]++;
   const have = roundMoney(people.filter((p) => p.group === "have").reduce((s, p) => s + p.balance, 0));
   const owe = roundMoney(people.filter((p) => p.group === "owe").reduce((s, p) => s + p.balance, 0));
   const bestMove = pickBestMove(facts, people);

@@ -9,7 +9,6 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import pg from "pg";
 import { loadChat, loadFacts, loadOutboxStats, loadProjection, loadProposals, loadReportedLoans, maskPhone, parseWindow, type Db } from "./state.js";
 import { loadSim, runControl, type ControlDeps } from "./control.js";
-import { ACCOUNT_TYPES, addAccount, countAdded, loadUserAccounts, MAX_ADDED, parseAccount, removeAccount, updateAccount } from "./accounts.js";
 import { cancelOlderLinks, checkCode, endSession, linksValidFrom, migrateAuth, newCode, newSession, queueCode, sessionPhone, SESSION_TTL_MS } from "./auth.js";
 import { buildHuddle, decide, parseDecision, signLink, understand, verifyLink, type Decision } from "./huddle.js";
 
@@ -58,17 +57,6 @@ const authDb: Promise<Db> = (async () => {
   return mem as unknown as Db;
 })();
 authDb.catch((e) => console.error("[huddle] auth store unavailable:", e.message));
-
-const castName = (id: string) => {
-  const ch = cast.find((x: any) => x.id === id);
-  return ch ? `${ch.emoji} ${ch.name}` : id;
-};
-/** Loans told by text or added here, and accounts added here: from the same tables the agents read. */
-async function extrasFor(phone: string) {
-  const adb = await authDb;
-  const [reportedLoans, userAccounts] = await Promise.all([loadReportedLoans(adb, phone), loadUserAccounts(adb, phone)]);
-  return { reportedLoans, userAccounts };
-}
 
 /** The phone this link is for, if the link is current (not expired, not replaced by a newer one). */
 async function linkPhone(token: string): Promise<string | null> {
@@ -139,37 +127,7 @@ app.get("/me/:token/api", async (c) => {
   const agent = db
     ? await db.query<{ agent_handle: string | null }>(`SELECT agent_handle FROM p3_photon_spaces WHERE user_phone = $1`, [g.phone]).catch(() => ({ rows: [] }))
     : { rows: [] };
-  return c.json({
-    huddle: buildHuddle(facts, cast, await extrasFor(g.phone)),
-    source,
-    agentHandle: agent.rows[0]?.agent_handle ?? null,
-    accountTypes: Object.entries(ACCOUNT_TYPES).map(([id, t]) => ({ id, ...t, ownerName: castName(t.owner) })),
-  });
-});
-
-// "+ Add account": money the bank data doesn't cover. Stored where the agents read it (see accounts.ts).
-app.post("/me/:token/api/accounts", async (c) => {
-  const g = await gate(c);
-  if (g instanceof Response) return g;
-  const a = parseAccount(await c.req.json().catch(() => null));
-  if ("error" in a) return c.json(a, 400);
-  const adb = await authDb;
-  if ((await countAdded(adb, g.phone)) >= MAX_ADDED) return c.json({ error: `You can add up to ${MAX_ADDED} accounts. Remove one first.` }, 400);
-  return c.json({ ok: true, key: await addAccount(adb, g.phone, a) });
-});
-
-app.put("/me/:token/api/accounts/:key", async (c) => {
-  const g = await gate(c);
-  if (g instanceof Response) return g;
-  const a = parseAccount(await c.req.json().catch(() => null));
-  if ("error" in a) return c.json(a, 400);
-  return (await updateAccount(await authDb, g.phone, c.req.param("key"), a)) ? c.json({ ok: true }) : c.json({ error: "That account isn't here anymore." }, 404);
-});
-
-app.delete("/me/:token/api/accounts/:key", async (c) => {
-  const g = await gate(c);
-  if (g instanceof Response) return g;
-  return (await removeAccount(await authDb, g.phone, c.req.param("key"))) ? c.json({ ok: true }) : c.json({ error: "That account isn't here anymore." }, 404);
+  return c.json({ huddle: buildHuddle(facts, cast, { reportedLoans: db ? await loadReportedLoans(db, g.phone) : [] }), source, agentHandle: agent.rows[0]?.agent_handle ?? null });
 });
 
 // "Where this is heading": every account over a window the person picks. The numbers come from P1's projection.
@@ -200,7 +158,7 @@ app.post("/me/:token/api/decide", async (c) => {
   const d = parseDecision(await c.req.json().catch(() => null));
   if (!d) return c.json({ error: "bad decision" }, 400);
   const { facts } = await loadFacts(env.financeUrl, env.secret, env.fixture);
-  return c.json(await decide(facts, d, whatIf, await extrasFor(g.phone)));
+  return c.json(await decide(facts, d, whatIf, { reportedLoans: db ? await loadReportedLoans(db, g.phone) : [] }));
 });
 
 // Typed "what if…" questions. Gemini only decides which decision it is; the numbers come from decide().
@@ -245,7 +203,7 @@ app.post("/me/:token/api/ask", async (c) => {
   const { decision, by } = await understand(text, facts.localDate, askGemini);
   console.log(`[huddle] ask ${JSON.stringify(text)} -> ${JSON.stringify(decision)} (${by})`);
   if (!decision) return c.json({ understood: false, by });
-  return c.json({ understood: true, by, decision: decision as Decision, result: await decide(facts, decision, whatIf, await extrasFor(g.phone)) });
+  return c.json({ understood: true, by, decision: decision as Decision, result: await decide(facts, decision, whatIf, { reportedLoans: db ? await loadReportedLoans(db, g.phone) : [] }) });
 });
 
 // For the agents service (P2): a fresh link for the welcome text or when the user asks for it.
@@ -266,15 +224,15 @@ else console.warn("[dashboard] DASHBOARD_PASSWORD not set: dashboard is public")
 app.get("/", (c) => c.html(page()));
 
 app.get("/api/state", async (c) => {
-  const [{ facts, source }, chat, outbox, proposals, sim, extras] = await Promise.all([
+  const [{ facts, source }, chat, outbox, proposals, sim, reportedLoans] = await Promise.all([
     loadFacts(env.financeUrl, env.secret, env.fixture),
     db && env.demoPhone ? loadChat(db, env.demoPhone).catch(() => []) : Promise.resolve([]),
     db ? loadOutboxStats(db).catch(() => null) : Promise.resolve(null),
     db && env.demoPhone ? loadProposals(db, env.demoPhone).catch(() => []) : Promise.resolve([]),
     env.fixture ? Promise.resolve(null) : loadSim(control),
-    env.demoPhone ? extrasFor(env.demoPhone).catch(() => ({ reportedLoans: [], userAccounts: [] })) : Promise.resolve({ reportedLoans: [], userAccounts: [] }),
+    db && env.demoPhone ? loadReportedLoans(db, env.demoPhone) : Promise.resolve([]),
   ]);
-  return c.json({ facts, source, chat, outbox, proposals, sim: sim?.sim ?? null, reportedLoans: extras.reportedLoans, userAccounts: extras.userAccounts, user: env.demoPhone ? maskPhone(env.demoPhone) : null });
+  return c.json({ facts, source, chat, outbox, proposals, sim: sim?.sim ?? null, reportedLoans, user: env.demoPhone ? maskPhone(env.demoPhone) : null });
 });
 
 // Behind the dashboard login: open the demo user's Huddle already signed in (the team is logged in here).

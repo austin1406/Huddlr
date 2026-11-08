@@ -220,7 +220,7 @@ function renderHeader(s) {
 // the bank data adds (a CD, a mortgage, ...) gets its own card.
 const EXTRA_LOOK = { cd: ["🔒", "CD"], mortgage: ["🏠", "Mortgage"] };
 const isLoan = (k) => /loan/i.test(k) && !/mortgage/i.test(k);
-function renderAccounts(f, told = [], added = []) {
+function renderAccounts(f, told = []) {
   const loanAccts = f.accounts.filter((a) => isLoan(a.kind));
   const cards = f.accounts.filter((a) => !isLoan(a.kind)).map((a) => {
     const owed = /credit|mortgage|debt/i.test(a.kind);
@@ -234,18 +234,12 @@ function renderAccounts(f, told = [], added = []) {
   if (loanAccts.length || told.length) {
     const parts = [
       ...loanAccts.map((a) => `${a.kind === "car_loan" ? "car" : a.name.toLowerCase()} ${money(a.balance, 0)}${a.monthlyPayment ? " (" + money(a.monthlyPayment, 0) + "/mo)" : ""}`),
-      ...told.map((l) => `${l.label.toLowerCase()} ${l.owed != null ? money(l.owed, 0) : "?"} (${l.addedVia === "huddle" ? "added" : "by text"})`),
+      ...told.map((l) => `${l.label.toLowerCase()} ${l.owed != null ? money(l.owed, 0) : "?"} (by text)`),
     ];
     const total = loanAccts.reduce((n, a) => n + a.balance, 0) + told.reduce((n, l) => n + (l.owed || 0), 0);
     const [emo, name] = CAST.car_loan;
     const at = Math.min(cards.length, 3); // keep the card where the loan used to be
     cards.splice(at, 0, `<div class="acct"><div class="n">${emo} ${esc(name)}</div><div class="v">${money(total, 0)}</div><div class="s">${esc("owed · " + parts.join(" · "))}</div></div>`);
-  }
-  // Accounts the user added on the Huddle page (not in the bank data).
-  for (const a of added) {
-    const owed = a.group === "owe";
-    const by = { checking: "Checking", savings: "Savings", ira: "IRA", card: "Card", car_loan: "Loan" }[a.owner] || a.owner;
-    cards.push(`<div class="acct"><div class="n">➕ ${esc(a.name)}</div><div class="v">${money(a.balance, owed ? 0 : 2)}</div><div class="s">${esc((owed ? "owed" : "held") + " · added by user · " + by + " speaks for it")}</div></div>`);
   }
   $("accounts").innerHTML = cards.join("");
 }
@@ -439,7 +433,7 @@ let lastSource = "";
 async function tick() {
   try {
     const s = await (await fetch("/api/state", { cache: "no-store" })).json();
-    lastSource = s.source; renderSim(s.sim); renderHeader(s); renderAccounts(s.facts, s.reportedLoans || [], s.userAccounts || []); renderGauges(s.facts); renderForecast(s.facts);
+    lastSource = s.source; renderSim(s.sim); renderHeader(s); renderAccounts(s.facts, s.reportedLoans || []); renderGauges(s.facts); renderForecast(s.facts);
     renderProposals(s); renderEvents(s.facts); renderChat(s.chat || []);
   } catch (e) {
     $("source").className = "chip bad"; $("source").textContent = "● dashboard offline";
