@@ -26,6 +26,17 @@ export function devRoutes(app: Hono, deps: { db: Queryable; userPhone: string; n
     return c.json({ inboundId: Number(r.rows[0].id), note: "handled within ~1 s; then GET /agents/dev/chat" });
   });
 
+  // Pretend the user texted a photo. Locally the attachment id is just a file path on this laptop.
+  app.post("/dev/photo", async (c) => {
+    const { path } = (await c.req.json().catch(() => ({}))) as { path?: string };
+    if (!path) return c.json({ error: 'path required, e.g. {"path":"test/fixtures/price-tag.png"}' }, 400);
+    const r = await db.query<{ id: number }>(
+      "INSERT INTO inbound_messages (provider_msg_id, user_phone, attachment_ids, received_sim_at) VALUES ($1, $2, $3, $4) RETURNING id",
+      [`dev-photo-${Date.now()}`, userPhone, [path], await deps.now()],
+    );
+    return c.json({ inboundId: Number(r.rows[0].id), note: "read by Gemini within a few seconds; then GET /agents/dev/chat" });
+  });
+
   app.get("/dev/chat", async (c) => {
     const r = await db.query<{ direction: string; speaker: string; text: string; created_sim_at: string | Date }>(
       "SELECT direction, speaker, text, created_sim_at FROM memory_messages WHERE user_phone = $1 ORDER BY id DESC LIMIT 40",
