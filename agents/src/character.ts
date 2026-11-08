@@ -221,7 +221,9 @@ export function buildPrompt(
                   : [`The plan sends money to ${winner} (${why}), but ${winner} hasn't spoken. Don't say anyone "is right"; just give the reason in plain words.`];
               })()
             : []),
-          `End with exactly: "Reply YES to: ${ask ?? "this plan"}."`,
+          ask
+            ? `End with exactly: "${doLine(ask)}" (the user makes the move themselves; you can't move money, so never ask them to reply YES).`
+            : `End by naming the first move to make in their bank app. Never ask them to reply YES.`,
         ]
       : []),
     ``,
@@ -247,13 +249,23 @@ const REASON: Record<string, string> = {
   extra_debt_payment: "to pay down debt",
 };
 
-/** Coach's grounded plan message. `ask` is the proposal's action text, the one thing a YES approves. */
+/**
+ * The one move the user makes, as the Coach says it: "Move $150.00 from Checking to IRA in your bank app."
+ * The Coach can't move money, so it never asks for a YES; the plan is checked off when P1 sees the transfer.
+ */
+export const doLine = (ask: string) => `${ask} in your bank app.`;
+
+/** Coach's grounded plan message. `ask` is the proposal's action text: the one move the user makes. */
 export function planTemplate(plan: Plan, ask?: string | null): string {
   const [first, ...rest] = plan.lines.filter((l) => l.amount > 0);
-  if (!first) return ask ? `Bottom line: ${ask}. Reply YES to: ${ask}.` : `Bottom line: nothing to move right now.`;
+  if (!first) return ask ? `Bottom line: ${doLine(ask)}` : `Bottom line: nothing to move right now.`;
   const head = `Bottom line: ${usd(first.amount)} to ${destName(first.destination)} ${REASON[first.reasonCode] ?? ""}`.trim() + ".";
-  const extra = rest.length ? ` The plan also suggests ${rest.map((l) => `${usd(l.amount)} to ${destName(l.destination)}`).join(" and ")} for later.` : "";
-  return ask ? `${head}${extra} Reply YES to: ${ask}.` : `${head}${extra} Reply YES to approve, or tell me what to change.`;
+  const keep = rest.filter((l) => l.destination === "checking" && l.reasonCode === "cover_shortfall");
+  const later = rest.filter((l) => !keep.includes(l));
+  const extra =
+    keep.map((l) => ` Keep ${usd(l.amount)} in Checking so you're not short before payday.`).join("") +
+    (later.length ? ` The plan also suggests ${later.map((l) => `${usd(l.amount)} to ${destName(l.destination)}`).join(" and ")} for later.` : "");
+  return ask ? `${head}${extra} ${doLine(ask)}` : `${head}${extra} Tell me if you'd like a different split.`;
 }
 
 export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | null, ask?: string | null): string {
@@ -313,7 +325,7 @@ export function explainTemplate(id: CharacterId, facts: FactsSnapshot): string {
       return `Your car loan has ${usd(l?.balance ?? 0)} still owed, paid down ${usd(l?.monthlyPayment ?? 0)} each month. Extra payments shorten the loan and cut the interest.`;
     }
     case "coach":
-      return `Here's the short version: each account watches one part of your money, and I turn what they say into one plan you can approve with YES. Ask about any word and I'll break it down.`;
+      return `Here's the short version: each account watches one part of your money, and I turn what they say into one simple move you make in your bank app. Ask about any word and I'll break it down.`;
   }
 }
 
@@ -370,7 +382,8 @@ export function coachProblem(
     }
     return null;
   }
-  if (ask && !text.includes(`Reply YES to: ${ask}`)) return `It must end with exactly "Reply YES to: ${ask}."`;
+  if (/reply yes|say yes|text yes/i.test(text)) return `Don't ask them to reply YES; you can't move money. Tell them the move to make in their bank app.`;
+  if (ask && !text.toLowerCase().includes(doLine(ask).toLowerCase().replace(/\.$/, ""))) return `It must end with exactly "${doLine(ask)}"`;
   if (!/^\s*Bottom line:/i.test(text)) return `Start with "Bottom line:" and the one thing to do now.`;
   const first = plan.lines[0];
   if (!first) return null;

@@ -41,13 +41,13 @@ test("bottom line with a plan waiting: the one action, why, and the rest as opti
   const facts = await (await finance()).facts();
   const text = bottomLine(facts, { actionText: "Move $150.00 from Checking to IRA", to: "ira", plan: paycheckPlan, windfall: false });
   assert.equal(text,
-    "Bottom line: reply YES to move $150.00 from Checking to IRA. That grabs your employer match: free money your job adds when you put money in. " +
-    "The plan also suggests $1,161.50 to your card; you can do that in your bank app whenever you're ready.");
+    "Bottom line: move $150.00 from Checking to IRA in your bank app. That grabs your employer match: free money your job adds when you put money in. " +
+    "The plan also suggests $1,161.50 to your card whenever you're ready. I'll check it off when I see the transfer.");
 });
 
 test("bottom line with nothing waiting: says whether anything needs doing", async () => {
   assert.match(bottomLine(await (await finance()).facts(), null), /^Bottom line: nothing needs your OK right now\. You have \$437\.50 safe to spend until payday on Nov 20\.$/);
-  assert.match(bottomLine(await (await finance("shortfall")).facts(), null), /^Bottom line: you'd be short \$43\.00 on Dec 2\. Moving \$143\.00 from Savings to Checking fixes it/);
+  assert.match(bottomLine(await (await finance("shortfall")).facts(), null), /^Bottom line: you'd be short \$43\.00 on Dec 2\. Moving \$143\.00 from Savings to Checking in your bank app fixes it/);
 });
 
 test("the screenshot: 'so what should i do' with a plan waiting gets the bottom line, not 'only a clear YES'", async () => {
@@ -63,7 +63,8 @@ test("the screenshot: 'so what should i do' with a plan waiting gets the bottom 
   const r = await handleChat({ db, facts: () => f.facts(), userPhone: PHONE, finance: f, proposals, model: async () => "unused" }, row, now);
   assert.equal(r.responder, "coach");
   const out = (await db.query<{ text: string }>("SELECT text FROM outbox ORDER BY id DESC LIMIT 1")).rows[0].text;
-  assert.match(out, /^Bottom line: reply YES to move \$150\.00 from Checking to IRA\./);
+  assert.match(out, /^Bottom line: move \$150\.00 from Checking to IRA in your bank app\./);
+  assert.doesNotMatch(out, /reply yes/i, "the Coach can't move money, so it never asks for a YES");
   assert.equal((await proposals.getPending(PHONE))?.status, "pending", "answering never approves");
 });
 
@@ -99,5 +100,5 @@ test("bill due soon (no plan): accounts explain, the Coach closes with a bottom 
 
 test("the Coach's pre-written plan line leads with the bottom line too", () => {
   const t = planTemplate(paycheckPlan, "Move $150.00 from Checking to IRA");
-  assert.match(t, /^Bottom line: \$150\.00 to IRA to grab the free employer match\. The plan also suggests \$1,161\.50 to Card for later\. Reply YES to: Move \$150\.00 from Checking to IRA\.$/);
+  assert.match(t, /^Bottom line: \$150\.00 to IRA to grab the free employer match\. The plan also suggests \$1,161\.50 to Card for later\. Move \$150\.00 from Checking to IRA in your bank app\.$/);
 });

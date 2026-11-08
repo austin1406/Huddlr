@@ -101,7 +101,7 @@
         "*"
       ],
       "always_last": true,
-      "wants": "Give the plan in plain words: where each part of the money goes and why, then the one action to approve."
+      "wants": "Give the bottom line in plain words: the one move to make in their bank app and why, then anything else for later."
     }
   ]
 }

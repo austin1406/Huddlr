@@ -39,7 +39,7 @@ test("answers from the last call summary and the latest plan, even while a plan 
   assert.equal(out.length, 1);
   assert.equal(out[0].speaker, "coach");
   assert.match(out[0].text, /On our last call \(Dec 2\): You agreed to cover rent week/);
-  assert.match(out[0].text, /Latest plan: Move \$143\.00 from Savings to Checking\. Status: still waiting on your YES/);
+  assert.match(out[0].text, /Latest plan: Move \$143\.00 from Savings to Checking\. Status: still to do in your bank app/);
 });
 
 test("nothing on record gets an honest answer", async () => {

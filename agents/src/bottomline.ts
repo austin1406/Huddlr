@@ -30,8 +30,8 @@ export function whyLine(l: PlanLine): string {
 }
 
 /**
- * The bottom line. With a plan waiting: "Bottom line: reply YES to …" plus why, plus the rest of the plan as
- * something they can do themselves later. With nothing waiting: whether anything needs doing right now.
+ * The bottom line. With a plan waiting: "Bottom line: move … in your bank app." plus why, plus the rest of the plan
+ * as something they can do later. The Coach can't move money, so it never asks for a YES. With nothing waiting: whether anything needs doing right now.
  */
 export function bottomLine(facts: FactsSnapshot, waiting: { actionText: string; to: string; plan: Plan; windfall: boolean } | null): string {
   if (waiting) {
@@ -40,15 +40,16 @@ export function bottomLine(facts: FactsSnapshot, waiting: { actionText: string; 
     const keep = waiting.windfall ? rest.filter((l) => l.destination === "checking") : [];
     const later = rest.filter((l) => !keep.includes(l));
     return [
-      `Bottom line: reply YES to ${waiting.actionText.charAt(0).toLowerCase()}${waiting.actionText.slice(1)}.`,
+      `Bottom line: ${waiting.actionText.charAt(0).toLowerCase()}${waiting.actionText.slice(1)} in your bank app.`,
       ...(yes ? [whyLine(yes)] : []),
       ...keep.map((l) => `Keep ${usd(l.amount)} in Checking so you're not short before payday.`),
-      ...(later.length ? [`The plan also suggests ${later.map((l) => `${usd(l.amount)} to ${NAME[String(l.destination)] ?? String(l.destination)}`).join(" and ")}; you can do that in your bank app whenever you're ready.`] : []),
+      ...(later.length ? [`The plan also suggests ${later.map((l) => `${usd(l.amount)} to ${NAME[String(l.destination)] ?? String(l.destination)}`).join(" and ")} whenever you're ready.`] : []),
+      `I'll check it off when I see the transfer.`,
     ].join(" ");
   }
   const s = facts.shortfall;
   if (s)
-    return `Bottom line: you'd be short ${usd(s.amount)} on ${day(s.firstNegativeDate)}. Moving ${usd(s.suggestedTransfer)} from Savings to Checking fixes it, and I'll send you that plan to approve.`;
+    return `Bottom line: you'd be short ${usd(s.amount)} on ${day(s.firstNegativeDate)}. Moving ${usd(s.suggestedTransfer)} from Savings to Checking in your bank app fixes it.`;
   const f = facts.forecast;
   return `Bottom line: nothing needs your OK right now. You have ${usd(f.safeToSpendUntilPayday)} safe to spend until payday on ${day(f.nextPayday)}.`;
 }

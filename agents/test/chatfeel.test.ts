@@ -45,7 +45,7 @@ test("bonus debate: Coach signpost first, accounts in turn, a reply threads unde
     prompts.push(p);
     if (p.startsWith("You are Card")) return "You owe $2,400.00 at 24% APR. Sending $457.00 there saves you $9.14 a month in interest.";
     if (p.startsWith("You are Checking")) return "Adding to Card: keeping $143.00 here covers the $43.00 gap on Dec 2.";
-    return "Keep $143.00 in Checking for the gap and send $457.00 to Card for the interest. Reply YES to: Move $457.00 from Checking to Card.";
+    return "Bottom line: keep $143.00 in Checking for the gap and send $457.00 to Card for the interest. Move $457.00 from Checking to Card in your bank app.";
   };
   await runWindfall({ db, finance, proposals: makeProposalService(db, () => now), userPhone: PHONE, model }, { inboundId: 1, text: "I got a $600 bonus", amount: 600, label: "the user got a bonus" }, now);
 

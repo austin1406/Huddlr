@@ -7,7 +7,7 @@ const RECALL = /\b(what\s+(did|have)\s+we\s+(decide|agree|say|settle)|what\s+was
 export const isRecallQuestion = (text: string) => RECALL.test(text);
 
 const STATUS_WORDS: Record<string, string> = {
-  pending: "still waiting on your YES",
+  pending: "still to do in your bank app",
   accepted: "you said yes; I'm watching for the transfer",
   declined: "you said no, so nothing moved",
   expired: "it expired before you answered, so nothing moved",

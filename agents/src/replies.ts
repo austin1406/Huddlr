@@ -72,7 +72,9 @@ export async function handleInbound(
     }
     return { kind: "chat" };
   }
-  if (intent === "unclear" && (isRecallQuestion(text) || !looksLikeAnswer(text))) return { kind: "chat" };
+  // Anything that isn't a clear YES or NO is conversation: answer it, never hold the user up for a YES/NO.
+  // (Only a clear YES approves; the user moves the money themselves anyway.)
+  if (intent === "unclear") return { kind: "chat" };
 
   const id = Number(pending.id);
   const say = sayAbout(id);

@@ -7,7 +7,7 @@ import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, prio
 import { accountSummary, isSummaryQuestion } from "./summary";
 import { bottomLine } from "./bottomline";
 import { isBottomLineQuestion } from "./replies";
-import { explainTemplate, lowestBreakdown, speak } from "./character";
+import { doLine, explainTemplate, lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
@@ -202,11 +202,11 @@ export async function handleChat(
       if (next && next.actionText !== pending.actionText) {
         const created = await deps.proposals.create({ userPhone: deps.userPhone, plan: pending.plan, ...next, sourceEventId: pending.source });
         if (created.proposal) await scheduleProposalFollowUps(deps.db, { userPhone: deps.userPhone, proposalId: Number(created.proposal.id), now, emergency: false });
-        reply += ` I've updated the plan. Reply YES to: ${next.actionText}.`;
+        reply += ` I've updated the plan: ${doLine(next.actionText)}`;
       } else if (missing) {
-        reply += ` The plan that's waiting doesn't put anything in ${NAMES[top]}; it goes first next time there's money to place. Still waiting on your YES: ${pending.actionText}.`;
+        reply += ` The plan that's waiting doesn't put anything in ${NAMES[top]}; it goes first next time there's money to place. Still to do: ${doLine(pending.actionText)}`;
       } else {
-        reply += ` Your plan already starts there. Reply YES to: ${pending.actionText}.`;
+        reply += ` Your plan already starts there: ${doLine(pending.actionText)}`;
       }
     }
     await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:priorities`, speaker: "coach", text: reply });
@@ -266,7 +266,7 @@ export async function handleChat(
   const context = [
     ...(recent.lines.length ? [`RECENT CONVERSATION (oldest first):`, ...recent.lines] : []),
     ...(followUp ? [`ALL BALANCES: ${balances}.`] : []),
-    ...(pending ? [`THE PLAN WAITING FOR THEIR YES: "${pending.actionText}". The full plan: ${pending.split}.`] : []),
+    ...(pending ? [`THE PLAN (the user makes the move themselves in their bank app; you never ask for a YES): "${doLine(pending.actionText)}" The full plan: ${pending.split}.`] : []),
     ...(recent.lines.length || pending
       ? [`Answer their latest text as part of this conversation, not from scratch. If they're confused about the plan, explain plainly what it does and why, with its numbers. Never contradict the waiting plan or invent a different one.`]
       : []),

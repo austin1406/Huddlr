@@ -52,7 +52,7 @@ test("rent-week shortfall: accounts speak, Coach goes last with P1's plan and a 
   assert.ok(sent.length >= 2 && sent.length <= 3, `got ${sent.length} messages`);
   assert.equal(sent.at(-1)!.speaker, "coach", "Coach always last");
   assert.ok(sent.every((m) => m.priority === 2), "a within-48h shortfall is an emergency");
-  assert.match(sent.at(-1)!.text, /Reply YES to: Move \$143\.00 from Savings to Checking/);
+  assert.match(sent.at(-1)!.text, /Move \$143\.00 from Savings to Checking in your bank app/);
 
   const pending = await proposals.getPending(PHONE);
   assert.equal(pending?.amount, facts.shortfall!.suggestedTransfer);

@@ -59,7 +59,8 @@ export async function runFollowUps(deps: {
     if (f.kind === "proposal_reminder") {
       if (!stillOpen) { results.push({ id, kind: f.kind, outcome: "skipped" }); continue; }
       const until = new Date(p.expires_at).toLocaleTimeString("en-US", { timeZone: facts.timezone, hour: "numeric", minute: "2-digit" });
-      await say("reminder", `Quick nudge: I still need a YES to: ${p.action_text}. This plan is open until ${until}.`, facts.shortfall?.within48Hours ? 2 : 0);
+      // The Coach can't move money: the reminder is about making the move, not about replying YES.
+      await say("reminder", `Quick nudge: still to do, ${p.action_text.charAt(0).toLowerCase()}${p.action_text.slice(1)} in your bank app. I'll check it off when I see the transfer${facts.shortfall?.within48Hours ? `; this one matters before ${until}` : ""}.`, facts.shortfall?.within48Hours ? 2 : 0);
       results.push({ id, kind: f.kind, outcome: "reminded" });
       continue;
     }

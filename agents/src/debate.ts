@@ -316,7 +316,7 @@ export async function runWindfall(
     });
   else if (plan && !main && keep > 0)
     // Everything stays in Checking: nothing to move, so nothing to say YES to.
-    line = { text: `Keep the whole ${usd(ask.amount)} in Checking for now${facts.shortfall ? `: you'd be short ${usd(facts.shortfall.amount)} before payday, and this covers it` : ""}. Nothing to move, so no YES needed.` };
+    line = { text: `Keep the whole ${usd(ask.amount)} in Checking for now${facts.shortfall ? `: you'd be short ${usd(facts.shortfall.amount)} before payday, and this covers it` : ""}. Nothing to move.` };
   else
     // No new proposal could be made: never invite a YES here, it could approve something else.
     line = { text: `Good problem to have. I couldn't build a plan for the ${usd(ask.amount)} right now. Text me again in a minute and the crew will weigh in.` };
