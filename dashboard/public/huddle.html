@@ -320,8 +320,9 @@ function forecastBody() {
   const cur = p.current, coach = fc.compare ? p.coach : null;
   const label = exact ? fcLabel() : `${p.days} days`;
   const s = cur.summary, e = cur.points.at(-1), c = coach?.points.at(-1);
+  const u = cur.uncertainty, uc = coach?.uncertainty;
 
-  let head = `In ${esc(label)}, your net worth goes from <b>${usd(cur.start.netWorth)}</b> to <b>${usd(e.netWorth)}</b> if nothing changes.`;
+  let head = `In ${esc(label)}, your net worth goes from <b>${usd(cur.start.netWorth)}</b> to <b>${usd(e.netWorth)}</b> if nothing changes${u ? `, most likely between ${usd(u.endNetWorth.p10)} and ${usd(u.endNetWorth.p90)}` : ""}.`;
   if (e.checking > 6000 && e.card > 0) head += ` Meanwhile <b>${usd(e.checking)}</b> sits in checking while the card still charges interest.`;
   if (coach) {
     const gain = c.netWorth - e.netWorth, saved = s.interestPaid - coach.summary.interestPaid;
@@ -330,27 +331,31 @@ function forecastBody() {
   }
   if (s.firstNegativeDate) head += ` <b style="color:var(--concern)">Checking runs out on ${esc(day(s.firstNegativeDate))}.</b>`;
 
-  const lg = `<div class="fc-lg"><span><i style="background:var(--accent)"></i>Current course</span>${coach ? `<span><i style="background:var(--good)"></i>With the Coach's plan</span>` : ""}<span><i style="background:var(--concern);height:8px;opacity:.35"></i>Below zero: you owe more than you own</span></div>`;
+  const lg = `<div class="fc-lg"><span><i style="background:var(--accent)"></i>Current course</span>${coach ? `<span><i style="background:var(--good)"></i>With the Coach's plan</span>` : ""}${u ? `<span><i style="background:var(--accent);height:8px;opacity:.3"></i>Likely range (80%)</span>` : ""}<span><i style="background:var(--concern);height:8px;opacity:.35"></i>Below zero: you owe more than you own</span></div>`;
 
   const chip = (cls, id, name, d, who) => d ? `<span class="${cls}">${tag(id, name)} paid off ${monYear(d)} (${who})</span>` : "";
   const mile = chip("cur", "card", "Card", s.cardPaidOffDate, "current") + chip("cur", "car_loan", "Loan", s.carLoanPaidOffDate, "current")
     + (coach ? chip("", "card", "Card", coach.summary.cardPaidOffDate, "plan") + chip("", "car_loan", "Loan", coach.summary.carLoanPaidOffDate, "plan") : "");
 
-  const tile = (k, v, sub) => `<div class="fc-tile"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${sub}</div></div>`;
-  const tiles = tile("Net worth at the end", usd(e.netWorth), coach ? `With plan: ${usd(c.netWorth)}` : `Today: ${usd(cur.start.netWorth)}`)
+  const foundChips = (cur.model?.detectedRecurring ?? []).map((r) => `<span class="cur">🔁 ${esc(r.label)} ${usd(r.amount)} ${r.everyDays === 30 ? "a month" : r.everyDays === 14 ? "every 2 weeks" : "a week"} (found)</span>`).join("");
+  const tile = (k, v, sub, col) => `<div class="fc-tile"><div class="k">${k}</div><div class="v num"${col ? ` style="color:${col}"` : ""}>${v}</div><div class="s">${sub}</div></div>`;
+  const tiles = tile("Net worth at the end", usd(e.netWorth), [u ? `Likely ${kfmt(u.endNetWorth.p10)} to ${kfmt(u.endNetWorth.p90)}` : "", coach ? `With plan: ${usd(c.netWorth)}` : u ? "" : `Today: ${usd(cur.start.netWorth)}`].filter(Boolean).join(" · "))
     + tile("Card paid off", s.cardPaidOffDate ? monYear(s.cardPaidOffDate) : "Not in this window", coach ? `With plan: ${coach.summary.cardPaidOffDate ? monYear(coach.summary.cardPaidOffDate) : "Not in this window"}` : `Owes ${usd(cur.start.card)} today`)
     + tile("Interest paid", usd(s.interestPaid), coach ? `With plan: ${usd(coach.summary.interestPaid)}` : "Card and loan")
-    + tile("Emergency fund", `${s.emergencyFundMonthsEnd.toFixed(1)} mo`, coach ? `With plan: ${coach.summary.emergencyFundMonthsEnd.toFixed(1)} mo` : "Months of essentials");
+    + tile("Emergency fund", `${s.emergencyFundMonthsEnd.toFixed(1)} mo`, coach ? `With plan: ${coach.summary.emergencyFundMonthsEnd.toFixed(1)} mo` : "Months of essentials")
+    + (u ? tile("Chance checking dips below $0", `${Math.round(u.probCheckingNegative * 100)}%`, uc ? `With plan: ${Math.round(uc.probCheckingNegative * 100)}%` : "At some point in this window", u.probCheckingNegative >= 0.25 ? "var(--concern)" : u.probCheckingNegative >= 0.1 ? "var(--watch)" : "var(--good)") : "");
 
   const rows = [["checking", "Checking", "checking", 0], ["savings", "Savings", "savings", 0], ["ira", "IRA", "ira", 0], ["card", "Card", "card", 1], ["carLoan", "Loan", "car_loan", 1]]
     .map(([k, name, id, debt]) => `<tr><td>${tag(id, name)}${debt ? ' <span class="fc-muted">owed</span>' : ""}</td><td class="fc-muted num">${usd(cur.start[k])}</td><td class="${debt ? "fc-owe" : "fc-have"} num">${usd(e[k])}</td>${coach ? `<td class="${debt ? "fc-owe" : "fc-have"} num">${usd(c[k])}</td>` : ""}</tr>`).join("");
   const table = `<div class="fc-sub">Where each account ends up</div><table class="fc-acct"><tr><th>Account</th><th>Today</th><th>Current course</th>${coach ? "<th>With plan</th>" : ""}</tr>${rows}</table>`;
 
-  const asm = [...cur.assumptions, ...(coach ? coach.assumptions.slice(-1) : [])];
+  const asm = [...cur.assumptions, ...(coach ? coach.assumptions.filter((t) => !cur.assumptions.includes(t)) : [])];
+  const mdl = cur.model;
+  const modelNote = mdl ? `<p class="fc-note">${mdl.basis === "history" ? `Spending is learned from your last ${mdl.daysObserved} days: about ${usd(mdl.dailySpendMean)} a day.` : `Spending uses your profile's ${usd(mdl.dailySpendMean)} a day until there is history to learn from.`}</p>` : "";
   const note = exact ? "" : `<p class="fc-note">Sample data only has presets, so this shows the closest one (${esc(String(p.days))} days).</p>`;
   return `<p class="fc-head">${head}</p>${lg}<div id="fc-chart">${fcChart(cur, coach, p, label)}</div><div class="fc-read num" id="fc-read"></div>
-    <div class="fc-mile">${mile || '<span class="cur" style="color:var(--muted)">No debt is paid off inside this window</span>'}</div>
-    <div class="fc-tiles">${tiles}</div>${table}${note}
+    <div class="fc-mile">${mile + foundChips || '<span class="cur" style="color:var(--muted)">No debt is paid off inside this window</span>'}</div>
+    <div class="fc-tiles">${tiles}</div>${table}${modelNote}${note}
     <details class="fc-asm"><summary>What this assumes</summary><ul style="padding-left:18px;margin:6px 0 0">${asm.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></details>`;
 }
 
@@ -359,21 +364,28 @@ function fcChart(cur, coach, p, label) {
   const start = cur.start.date, span = Math.max(1, p.days - 1);
   const a = [cur.start, ...cur.points], b = coach ? [coach.start, ...coach.points] : null;
   const off = (d) => Math.round((Date.parse(d) - Date.parse(start)) / 864e5);
-  const vals = a.map((q) => q.netWorth).concat(b ? b.map((q) => q.netWorth) : []);
+  const vals = a.map((q) => q.netWorth).concat(b ? b.map((q) => q.netWorth) : []).concat(cur.uncertainty ? [...cur.uncertainty.p10, ...cur.uncertainty.p90] : []).concat(coach?.uncertainty ? [...coach.uncertainty.p10, ...coach.uncertainty.p90] : []);
   let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
   const padv = (hi - lo) * 0.08 || 1; lo -= padv; hi += padv;
   const x = (d) => pad.l + (off(d) / span) * (W - pad.l - pad.r);
   const y = (v) => pad.t + ((hi - v) / (hi - lo)) * (H - pad.t - pad.b);
   const path = (pts) => pts.map((q, i) => `${i ? "L" : "M"}${x(q.date).toFixed(1)} ${y(q.netWorth).toFixed(1)}`).join(" ");
+  const bandPath = (r, u0) => {
+    if (!u0) return "";
+    const top = [[r.start.date, r.start.netWorth], ...r.points.map((q, i) => [q.date, u0.p90[i]])];
+    const bottom = [...r.points.map((q, i) => [q.date, u0.p10[i]])].reverse().concat([[r.start.date, r.start.netWorth]]);
+    return [...top, ...bottom].map(([d, v], i) => `${i ? "L" : "M"}${x(d).toFixed(1)} ${y(v).toFixed(1)}`).join(" ") + "Z";
+  };
   const area = `${path(a)} L${x(a.at(-1).date).toFixed(1)} ${y(0).toFixed(1)} L${x(a[0].date).toFixed(1)} ${y(0).toFixed(1)}Z`;
   const yt = [lo + padv, (lo + hi) / 2, hi - padv].map((v) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--hair)"/><text x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${kfmt(v)}</text>`).join("");
   const xt = [0, 1, 2, 3, 4].map((i) => { const d = new Date(Date.parse(start) + Math.round((span * i) / 4) * 864e5).toISOString().slice(0, 10); return `<text x="${pad.l + ((W - pad.l - pad.r) * i) / 4}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}" font-size="11" fill="var(--muted)">${p.days <= 120 ? day(d) : monYear(d)}</text>`; }).join("");
   const dot = (r, d, col) => { if (!d) return ""; const q = r.reduce((m, z) => (Math.abs(off(z.date) - off(d)) < Math.abs(off(m.date) - off(d)) ? z : m)); return `<circle cx="${x(q.date).toFixed(1)}" cy="${y(q.netWorth).toFixed(1)}" r="5" fill="var(--surface)" stroke="${col}" stroke-width="3"/>`; };
-  fc.geom = { W, H, pad, a, b, x, y };
+  fc.geom = { W, H, pad, a, b, x, y, ua: cur.uncertainty, ub: coach?.uncertainty };
   return `<svg viewBox="0 0 ${W} ${H}" id="fc-svg" style="touch-action:none" role="img" aria-label="Net worth over ${esc(label)}: ${usd(cur.start.netWorth)} now, ${usd(a.at(-1).netWorth)} at the end on the current course${b ? ", " + usd(b.at(-1).netWorth) + " with the Coach's plan" : ""}">
     <rect x="${pad.l}" y="${y(0)}" width="${W - pad.l - pad.r}" height="${Math.max(0, H - pad.b - y(0))}" fill="var(--concern)" opacity=".08"/>
     ${yt}${xt}
     <line x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    ${cur.uncertainty ? `<path d="${bandPath(cur, cur.uncertainty)}" fill="var(--accent)" opacity=".14"/>` : ""}${b && coach.uncertainty ? `<path d="${bandPath(coach, coach.uncertainty)}" fill="var(--good)" opacity=".12"/>` : ""}
     <path d="${area}" fill="var(--accent)" opacity=".08"/>
     <path d="${path(a)}" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
     ${b ? `<path d="${path(b)}" fill="none" stroke="var(--good)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>` : ""}
@@ -389,7 +401,8 @@ function fcReadout(i) {
   const last = i == null;
   const idx = last ? g.a.length - 1 : i;
   const q = g.a[idx], r = g.b?.[idx];
-  el.innerHTML = `<span style="color:var(--muted)">${last ? "At the end" : ""} ${last ? "(" : ""}${esc(day(q.date))}, ${q.date.slice(0, 4)}${last ? ")" : ""}</span> &nbsp; <span style="color:var(--accent)">Current ${usd(q.netWorth)}</span>${r ? ` &nbsp; <span style="color:var(--good)">With plan ${usd(r.netWorth)}</span>` : ""}`;
+  const rng = g.ua && idx > 0 ? ` <span style="color:var(--muted)">(likely ${kfmt(g.ua.p10[idx - 1])} to ${kfmt(g.ua.p90[idx - 1])})</span>` : "";
+  el.innerHTML = `<span style="color:var(--muted)">${last ? "At the end" : ""} ${last ? "(" : ""}${esc(day(q.date))}, ${q.date.slice(0, 4)}${last ? ")" : ""}</span> &nbsp; <span style="color:var(--accent)">Current ${usd(q.netWorth)}</span>${rng}${r ? ` &nbsp; <span style="color:var(--good)">With plan ${usd(r.netWorth)}</span>` : ""}`;
   const sc = $("#fc-sc");
   if (!sc) return;
   if (last) { sc.style.display = "none"; return; }

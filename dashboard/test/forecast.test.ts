@@ -24,6 +24,20 @@ test("sample mode serves the closest preset and says when it is not exact", () =
   assert.ok(odd.projection.current.points.length > 0 && odd.projection.coach);
 });
 
+test("the sample fixture carries the likely range, aligned with its points, and says what it learned", () => {
+  for (const unit of [{ amount: 6, unit: "months" as const }, { amount: 5, unit: "years" as const }]) {
+    const { projection } = projectionFixture(unit);
+    for (const path of [projection.current, projection.coach]) {
+      const u = path.uncertainty;
+      assert.equal(u.p10.length, path.points.length);
+      assert.equal(u.p90.length, path.points.length);
+      assert.ok(u.p10.every((lo: number, i: number) => lo <= u.p50[i] && u.p50[i] <= u.p90[i]));
+      assert.ok(u.probCheckingNegative >= 0 && u.probCheckingNegative <= 1);
+      assert.equal(path.model.kind, "learned");
+    }
+  }
+});
+
 test("live mode asks finance for the window with the shared secret, and passes its answer through", async () => {
   const calls: { url: string; init: RequestInit }[] = [];
   const fetchImpl = (async (url: string, init: RequestInit) => {
@@ -63,4 +77,5 @@ test("the Huddle page script parses, and the old six-week chart is gone", () => 
   assert.ok(!html.includes("Next 6 weeks in Checking"));
   assert.ok(!html.includes("function timeline("));
   assert.ok(js.includes('API + "/project"'));
+  for (const piece of ["Likely range (80%)", "Chance checking dips below $0", "bandPath", "detectedRecurring", "Spending is learned from your last"]) assert.ok(html.includes(piece), piece);
 });
