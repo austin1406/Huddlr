@@ -13,7 +13,19 @@ export type OutboxRow = {
   reply_to: number | null;
   reply_to_outbox: number | null;
   attempts: number;
+  created_at: Date | string;
 };
+
+/**
+ * The key Photon uses to drop duplicate sends. It must be the same for every retry of one outbox row,
+ * but never repeat across rows, even after a demo reset restarts outbox ids and reuses P2's keys
+ * (Photon remembers keys and rejects a reused one: "Idempotency-Key was reused for a different request").
+ * The row's creation time makes it unique; the id and P2's key keep it readable in Photon's logs.
+ */
+export function photonKey(row: Pick<OutboxRow, "id" | "idempotency_key" | "created_at">): string {
+  const t = new Date(row.created_at).getTime();
+  return `outbox:${row.id}:${t}:${row.idempotency_key}`.slice(0, 200);
+}
 
 /** What the sender needs from Photon. Real functions in production, fakes in tests. */
 export type Transport = {
@@ -44,7 +56,7 @@ async function claimNext(db: Db): Promise<OutboxRow | undefined> {
   const r = await db.query<OutboxRow>(
     `UPDATE outbox SET status = 'sending', attempts = attempts + 1
      WHERE id = (SELECT id FROM outbox WHERE status = 'pending' ORDER BY priority DESC, id LIMIT 1 FOR UPDATE SKIP LOCKED)
-     RETURNING id, idempotency_key, user_phone, speaker, text, attachment, reply_to, reply_to_outbox, attempts`,
+     RETURNING id, idempotency_key, user_phone, speaker, text, attachment, reply_to, reply_to_outbox, attempts, created_at`,
   );
   return r.rows[0];
 }
@@ -99,7 +111,7 @@ export async function sendOne(
     await transport.setTyping(target, true);
     await wait(gapMs(row.text, demoMode));
 
-    const key = `outbox:${row.idempotency_key}`;
+    const key = photonKey(row);
     const res = (await transport.sendText(target, formatMessage(row.speaker, row.text), key, parent)) as { id?: string };
     if (row.attachment === "indicator_card" && transport.sendCard) {
       await transport.sendCard(target, row.user_phone, `${key}:card`);

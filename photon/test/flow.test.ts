@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { migrate, type Db } from "../src/db.js";
 import { saveInbound } from "../src/inbound.js";
-import { sendOne, gapMs, MAX_ATTEMPTS, type Transport } from "../src/sender.js";
+import { sendOne, gapMs, photonKey, MAX_ATTEMPTS, type Transport } from "../src/sender.js";
 import { formatMessage } from "../src/format.js";
 import type { InboundMessage } from "../src/message.js";
 
@@ -76,7 +76,7 @@ test("messages are held until the user texts, then sent to their conversation", 
   assert.equal(sent[0].text, "💳 Card: hello");
   assert.equal(sent[0].spaceId, "space_1");
   assert.equal(sent[0].senderId, "usr_agent");
-  assert.equal(sent[0].key, "outbox:k1");
+  assert.match(sent[0].key, /^outbox:\d+:\d+:k1$/);
   const row = (await db.query(`SELECT status, attempts FROM outbox`)).rows[0];
   assert.deepEqual(row, { status: "sent", attempts: 1 });
 });
@@ -138,4 +138,33 @@ test("a cast message threads under the earlier cast message it answers", async (
   await sendOne(db, t, noWait);
   assert.equal(sent[0].parent, "pho_msg_q"); // IRA under the user's question
   assert.equal(sent[1].parent, "pho_msg_1"); // Card under IRA's message (Photon id from the first send)
+});
+
+test("Photon keys never repeat after a demo reset reuses ids and P2 keys", async () => {
+  const before = photonKey({ id: 9, idempotency_key: "chat:9:savings", created_at: "2026-11-08T05:00:00.000Z" });
+  const after = photonKey({ id: 9, idempotency_key: "chat:9:savings", created_at: "2026-11-08T05:15:45.000Z" });
+  assert.notEqual(before, after);
+  // the same row always gets the same key, so retries are still deduplicated
+  assert.equal(before, photonKey({ id: 9, idempotency_key: "chat:9:savings", created_at: new Date("2026-11-08T05:00:00.000Z") }));
+});
+
+test("retries of one row reuse the same Photon key", async () => {
+  const db = await freshDb();
+  await saveInbound(db, inbound("pho_msg_r"));
+  await queue(db, "same");
+  const keys: string[] = [];
+  let fails = 1;
+  const t: Transport = {
+    async sendText(_t, _text, key) {
+      keys.push(key);
+      if (fails-- > 0) throw new Error("timeout");
+      return { id: "pho_msg_ok" };
+    },
+    async setTyping() {
+      return true;
+    },
+  };
+  assert.equal(await sendOne(db, t, noWait), "retry");
+  assert.equal(await sendOne(db, t, noWait), "sent");
+  assert.equal(keys[0], keys[1]);
 });
