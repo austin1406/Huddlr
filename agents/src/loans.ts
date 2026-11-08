@@ -202,3 +202,50 @@ export async function handleLoanReport(db: Queryable, phone: string, text: strin
   if (isNew) parts.push(`It isn't in your bank data, so forecasts and plans don't count its payment yet.`);
   return parts.join(" ");
 }
+
+/** "Can I get a house?", "can I take out a loan for a home?", "am I ready for a mortgage?" */
+export const isHomeQuestion = (text: string) =>
+  /\b(house|home|mortgage|condo|apartment)\b/i.test(text) &&
+  /\b(can i|could i|should i|am i|if i|want|wanna|thinking|planning|going to|gonna|qualify|afford|ready)\b/i.test(text) &&
+  /\b(get|buy|take out|take|afford|qualify|loan|mortgage|purchase|ready)\b/i.test(text);
+
+/**
+ * What a lender looks at for a home loan, from the user's real numbers (computed in code so every number passes the
+ * checker): monthly income from their paychecks, the debt payments they already make each month, what share of
+ * income those take, savings for a down payment, and how much of the card limit is used. Plus the common guidelines
+ * (debt payments under about 36% of income; a down payment of 3% to 20%).
+ */
+export function homeLoanCheck(facts: FactsSnapshot, reported: ReportedLoan[]) {
+  const pay = facts.upcomingPaychecks;
+  const paycheck = pay[0]?.amount ?? 0;
+  const days = pay.length > 1 ? Math.round((Date.parse(pay[1].date) - Date.parse(pay[0].date)) / 86_400_000) : 14;
+  const monthlyIncome = Math.round(((paycheck * 365) / Math.max(1, days) / 12) * 100) / 100;
+  const a = (id: string) => facts.accounts.find((x) => x.id === id);
+  const debts = [
+    ...(a("car_loan")?.monthlyPayment ? [{ name: "loan payment", amount: a("car_loan")!.monthlyPayment! }] : []),
+    ...(a("card")?.minimumPayment ? [{ name: "card minimum", amount: a("card")!.minimumPayment! }] : []),
+    ...reported.filter((r) => r.monthlyPayment).map((r) => ({ name: `${r.label} payment`, amount: r.monthlyPayment! })),
+  ];
+  const monthlyDebt = Math.round(debts.reduce((s, d) => s + d.amount, 0) * 100) / 100;
+  const debtSharePercent = monthlyIncome > 0 ? Math.round((monthlyDebt / monthlyIncome) * 100) : null;
+  const card = a("card");
+  return {
+    paycheck, paycheckEveryDays: days, monthlyIncome, debts, monthlyDebt, debtSharePercent,
+    savings: a("savings")?.balance ?? 0,
+    cardOwed: card?.balance ?? 0, cardUtilizationPercent: card?.limit ? Math.round((card.balance / card.limit) * 100) : null,
+    guidelines: { maxDebtSharePercent: 36, minDownPaymentPercent: 3, typicalDownPaymentPercent: 20, cardUsePercent: 30 },
+  };
+}
+
+/** The home-loan check as one line for the characters' prompts. */
+export function homeLoanCheckText(facts: FactsSnapshot, reported: ReportedLoan[]): string {
+  const h = homeLoanCheck(facts, reported);
+  // The comparisons are made here, in code, so the model can't get them backwards.
+  const debtVerdict = h.debtSharePercent == null ? "" : h.debtSharePercent <= h.guidelines.maxDebtSharePercent
+    ? ` That's UNDER the ${h.guidelines.maxDebtSharePercent}% guideline, which is a plus (though a home payment would add to it).`
+    : ` That's OVER the ${h.guidelines.maxDebtSharePercent}% guideline already, which would make a home loan hard.`;
+  const cardVerdict = h.cardUtilizationPercent == null ? "" : h.cardUtilizationPercent > h.guidelines.cardUsePercent
+    ? ` Card use over ${h.guidelines.cardUsePercent}% of the limit can lower a credit score; paying it down helps.`
+    : ` Card use is under ${h.guidelines.cardUsePercent}% of the limit, which helps a credit score.`;
+  return `HOME LOAN CHECK (what a lender looks at; use these exact numbers, no made-up home prices): income about ${usd(h.monthlyIncome)} a month (${usd(h.paycheck)} paychecks every ${h.paycheckEveryDays} days); debt payments already ${usd(h.monthlyDebt)} a month (${h.debts.map((d) => `${d.name} ${usd(d.amount)}`).join(", ") || "none"})${h.debtSharePercent != null ? `, about ${h.debtSharePercent}% of income` : ""}.${debtVerdict} Savings for a down payment: ${usd(h.savings)}, which is small for a down payment plus closing costs, so savings is the main thing to build. Card ${usd(h.cardOwed)} owed${h.cardUtilizationPercent != null ? ` (${h.cardUtilizationPercent}% of the limit used)` : ""}.${cardVerdict} Common guidelines: total debt payments, including a new home payment, under about ${h.guidelines.maxDebtSharePercent}% of income; a down payment of ${h.guidelines.minDownPaymentPercent}% to ${h.guidelines.typicalDownPaymentPercent}% of the price, plus closing costs.`;
+}

@@ -108,3 +108,39 @@ test("phone test: two things in one text get both answered, and thinking about a
   assert.equal(saved.rows.length, 0, "no 'other loan' saved");
   assert.ok((await out()).every((m) => !/other loan/.test(m.text)));
 });
+
+test("phone test: 'check with @loan if i can get a house' and 'so can i take out a loan for a house' answer the house question", async () => {
+  const { parseMention } = await import("../src/chat");
+  const { isHomeQuestion, homeLoanCheck } = await import("../src/loans");
+  assert.deepEqual(parseMention("can i check with @loan if i can get a house"), { who: "car_loan", rest: "can i check with loan if i can get a house" });
+  assert.equal(parseMention("email me at a@card.com"), null, "an email address isn't a mention");
+  for (const t of ["so can i take out a loan for a house", "can i get a house", "am i ready for a mortgage?"]) assert.equal(isHomeQuestion(t), true, t);
+  assert.equal(isHomeQuestion("i'm home"), false);
+
+  const prompts: string[] = [];
+  const { chat, out } = await setup(async (p) => {
+    prompts.push(p);
+    if (p.startsWith("You are Coach")) return "Bottom line: build your savings for a down payment first.";
+    return "Your debt payments are $392.00 a month, about 11% of income.";
+  });
+
+  // With @loan: Loan alone, answering the house question with the lender's-eye numbers.
+  let r = await chat("can i check with @loan if i can get a house");
+  assert.equal(r.responder, "car_loan");
+  assert.equal(r.debate, undefined);
+  assert.match(prompts.at(-1)!, /They're asking whether they can take out a home loan/);
+  assert.match(prompts.at(-1)!, /HOME LOAN CHECK .*income about \$3,584\.82 a month \(\$1,650\.00 paychecks every 14 days\); debt payments already \$392\.00 a month \(loan payment \$320\.00, card minimum \$72\.00\), about 11% of income\. That's UNDER the 36% guideline, which is a plus/);
+  assert.match(prompts.at(-1)!, /Savings for a down payment: \$900\.00, which is small/);
+  assert.match(prompts.at(-1)!, /Card use over 30% of the limit can lower a credit score/, "48% of the limit is over the 30% guideline");
+  assert.doesNotMatch(prompts.at(-1)!, /Include \$/, "no all-loans-total requirement for this question");
+
+  // No @: the whole table, each on their part of a home loan, then the Coach.
+  r = await chat("so can i take out a loan for a house");
+  assert.ok(r.debate && r.debate.length >= 3 && r.debate.at(-1) === "coach", `roundtable: ${r.debate}`);
+  assert.match(prompts.find((p, i) => i > 0 && p.startsWith("You are Coach"))!, /THEY'RE ASKING IF THEY CAN TAKE OUT A HOME LOAN/);
+  assert.equal((await out()).at(-1)!.text, "Bottom line: build your savings for a down payment first.");
+
+  const h = homeLoanCheck(await (await import("../src/finance")).financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) =>
+    createApp({ secret: "", state: new StubState("normal") }).request(u.replace("http://f", ""), i)) as typeof fetch).facts(), []);
+  assert.equal(h.debtSharePercent, 11);
+});

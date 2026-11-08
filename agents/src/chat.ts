@@ -5,7 +5,7 @@ import { accountsInQuestion, proposalFromPlan, type Waiting } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
 import { allMovesText, leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
-import { describeLoan, handleLoanReport, loadReportedLoans, loanSources, totalLoansOwed } from "./loans";
+import { describeLoan, handleLoanReport, homeLoanCheck, homeLoanCheckText, isHomeQuestion, loadReportedLoans, loanSources, totalLoansOwed } from "./loans";
 import { bottomLine } from "./bottomline";
 import { isBottomLineQuestion } from "./replies";
 import { config, doLine, explainTemplate, lowestBreakdown, speak } from "./character";
@@ -28,15 +28,26 @@ const MENTION_ALIASES: Record<string, CharacterId> = {
 };
 
 /**
- * "@savings how am I doing?" -> that character answers, with the @name removed from the question.
- * Only a leading @name counts, so an email address or "@" mid-sentence never reroutes a text.
+ * "@savings how am I doing?" or "can i check with @loan if i can get a house" -> that character answers, with the
+ * @name removed from the question. The @ must start the text or follow a space, so an email address
+ * (a@card.com) never reroutes a text.
  */
 export function parseMention(text: string): { who: CharacterId; rest: string } | null {
   // Tolerates an invisible character before the @ and the full-width ＠ some keyboards produce.
-  const m = text.trim().replace(/^[​-‍﻿]+/, "").match(/^[@＠]\s*([a-z_]+(?:\s+loan)?)\b[\s,:-]*(.*)$/is);
-  if (!m) return null;
-  const who = MENTION_ALIASES[m[1].toLowerCase().replace(/\s+/g, "")];
-  return who ? { who, rest: m[2].trim() } : null;
+  const t = text.trim().replace(/^[​-‍﻿]+/, "");
+  const lead = t.match(/^[@＠]\s*([a-z_]+(?:\s+loan)?)\b[\s,:-]*(.*)$/is);
+  if (lead) {
+    const who = MENTION_ALIASES[lead[1].toLowerCase().replace(/\s+/g, "")];
+    return who ? { who, rest: lead[2].trim() } : null;
+  }
+  // Mid-sentence: "check with @loan if ..." (a space before the @).
+  const mid = t.match(/(?:^|\s)[@＠]([a-z_]+(?:\s+loan)?)\b/i);
+  if (!mid) return null;
+  const who = MENTION_ALIASES[mid[1].toLowerCase().replace(/\s+/g, "")];
+  if (!who) return null;
+  // Keep the sentence as written, just without the "@": "can i check with loan if i can get a house".
+  const rest = t.replace(mid[0], (s) => s.replace(/[@＠]/, "")).replace(/\s+/g, " ").trim();
+  return { who, rest };
 }
 
 /**
@@ -167,7 +178,7 @@ export async function handleChat(
     /** "What should I do?" roundtable (debate.ts runOptions): every account's option, then the Coach's bottom line. */
     options?: (ask: { inboundId: number; text: string; waiting: Waiting | null }, now: Date) => Promise<{ speakers: CharacterId[] }>;
     /** General questions (debate.ts runRoundtable): the accounts weigh in, then the Coach. Without it, the Coach alone. */
-    roundtable?: (ask: { inboundId: number; text: string; context?: string; extraSources?: unknown[] }, now: Date) => Promise<{ speakers: CharacterId[] }>;
+    roundtable?: (ask: { inboundId: number; text: string; context?: string; extraSources?: unknown[]; accounts?: CharacterId[] }, now: Date) => Promise<{ speakers: CharacterId[] }>;
     /** Runs the group debate for a windfall (debate.ts runWindfall). Without it, the question gets one answer. */
     windfall?: (ask: { inboundId: number; text: string; amount: number; label: string }, now: Date) => Promise<{ speakers: CharacterId[] }>;
   },
@@ -294,14 +305,20 @@ export async function handleChat(
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
   // "What do I do if I want to take out a tuition loan?": advice about a loan they don't have yet.
-  const thinkingAboutLoan = responder === "car_loan" && /\b(if i|should i|thinking (?:of|about)|planning to|want to|wanna|going to|gonna)\b[^.?!]*\b(take out|take|get|apply for|borrow|sign)\b[^.?!]*\bloan/i.test(question);
+  // (Also "can i take out a loan for a house", "check with loan if i can get a house": phone testing.)
+  const homeQuestion = isHomeQuestion(question);
+  const thinkingAboutLoan = responder === "car_loan" &&
+    (homeQuestion || /\b(if i|can i|could i|should i|am i able to|thinking (?:of|about)|planning to|want to|wanna|going to|gonna)\b[^.?!]*\b(take out|take|get|apply for|borrow|sign|qualify for)\b[^.?!]*\b(loan|mortgage)/i.test(question));
+  const homeCheck = homeQuestion ? homeLoanCheckText(facts, await loadReportedLoans(deps.db, deps.userPhone)) : "";
   const ask = explain && !explainingPlan
     ? `The user asked: "${question}". Explain it in simple words, like you're texting a friend who's new to money: up to 3 short sentences, no jargon, and use one of their real numbers from KEY NUMBERS as the example. If it's about something said earlier in the conversation below, explain that, and don't repeat it word for word: say it a new, simpler way, like an everyday comparison. Plain meanings you can use: ${GLOSSARY}`
-    : mention
+    : mention && !thinkingAboutLoan
     ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
     : followUp && !explainingPlan
       ? `The user texted: "${question}". They're asking about the conversation below, most likely your last message. Explain plainly where its numbers come from, step by step, using your KEY NUMBERS (for Checking: the balance now, the bills before the low point, everyday spending, and the lowest point). If your last message was a "can I afford" answer, its lowest balance already has that purchase taken out: say the lowest point without it, then that the purchase takes it to the number you gave. If they mixed up two numbers, say which is which using ALL BALANCES. Answer the question; skip your usual pitch this time.`
-      : thinkingAboutLoan
+      : thinkingAboutLoan && homeQuestion
+        ? `The user texted: "${question}". They're asking whether they can take out a home loan. Answer that question honestly, not anything else: say what a lender looks at (steady income, the debts they already pay each month and what share of income that is, savings for a down payment and closing costs, the card balance), using their real numbers from HOME LOAN CHECK, and the one next step that would help most. Don't make up a home price. Up to 3 short sentences.\n${homeCheck}`
+        : thinkingAboutLoan
         ? `The user texted: "${question}". They're thinking about taking out a new loan. Answer that question, not anything else: say plainly what to check before signing (how much, the interest rate, the monthly payment, and whether that payment fits their budget), using one or two of their real numbers (like what's safe to spend until payday, or the payment on the loan they already have). End by offering to break it down if they text the amount, rate and monthly payment. Up to 3 short sentences.`
         : `The user texted: "${question}". Answer them directly in character.`;
   const reported = responder === "car_loan" ? await loadReportedLoans(deps.db, deps.userPhone) : [];
@@ -327,7 +344,8 @@ export async function handleChat(
   // the Coach's bottom line. (@-mentions, follow-ups, "explain…" and the Coach explaining a waiting plan stay one voice.)
   // A question naming two or more accounts ("card or savings first?") also gets the table, not just one of them.
   const general = responder === "coach" || accountsInQuestion(text).length >= 2;
-  if (((general && !followUp && !explain && !explainingPlan && !thinkingAboutLoan) || multiTopic) && !mention && deps.roundtable) {
+  // A house question with no @-mention gets the whole table (down payment, credit, current loans, budget).
+  if (((general && !followUp && !explain && !explainingPlan && !thinkingAboutLoan) || multiTopic || homeQuestion) && !mention && deps.roundtable) {
     // Facts for each part, computed in code: a purchase with a price gets P1's can_i_afford verdict; a loan they're
     // thinking about gets what to check before signing and what's safe to spend.
     const parts: string[] = [];
@@ -345,8 +363,15 @@ export async function handleChat(
       sources.push({ safeToSpendUntilPayday: facts.forecast.safeToSpendUntilPayday });
     }
     if (multiTopic) parts.push(`This text asks about more than one thing: each of you answers the part about your account, and the Coach's bottom line covers every part.`);
+    if (homeQuestion) {
+      parts.push(`THEY'RE ASKING IF THEY CAN TAKE OUT A HOME LOAN. Each account: say what a lender would look at on your side, with one real number from HOME LOAN CHECK (Savings: the down payment; Card: the balance and how much of the limit is used; Loan: the payments they already make; Checking: the paycheck). Coach: an honest bottom line on whether they're ready and the one next step. No made-up home prices.\n${homeCheck}`);
+      const reportedNow = await loadReportedLoans(deps.db, deps.userPhone);
+      sources.push(homeLoanCheck(facts, reportedNow));
+    }
     const r = await deps.roundtable({
       inboundId: inbound.id, text, context: [context, ...parts].filter(Boolean).join("\n"),
+      // A house: the down payment, the card, and the loans already being paid are what a lender looks at.
+      ...(homeQuestion ? { accounts: ["savings", "card", "car_loan"] as CharacterId[] } : {}),
       extraSources: [...goals.map((g) => g.value), extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : [])), recent.numbers, ...(pending ? [pending.plan] : []), ...sources],
     }, now);
     return { learned: 0, responder: "coach", debate: r.speakers };
@@ -377,6 +402,7 @@ export async function handleChat(
       ...(responder === "checking" ? [lowestBreakdown(facts)] : []),
       ...(responder === "car_loan" ? [...loanSources(reported, facts.localDate), totalLoansOwed(facts, reported)] : []),
       ...(thinkingAboutLoan ? [{ safeToSpendUntilPayday: facts.forecast.safeToSpendUntilPayday, nextPayday: facts.forecast.nextPayday }] : []),
+      ...(homeQuestion ? [homeLoanCheck(facts, reported)] : []),
     ],
   });
   // When Gemini's answer can't be sent, the fallback still answers the question asked:
