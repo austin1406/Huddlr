@@ -4,128 +4,153 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Your Money Huddle</title>
+<title>Money Huddle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
+/* Tokens: cool paper page, a deep navy table as the one bold object, green = money you have, raspberry = money you owe. */
 :root{
-  --bg:#f6f3ee; --card:#ffffff; --ink:#1d1b18; --muted:#6c665d; --line:#e6e0d6;
-  --good:#2f9e63; --watch:#d99a1c; --concern:#d64a3a; --good-bg:#e5f5ec; --watch-bg:#fbf0d9; --concern-bg:#fbe4e1;
-  --accent:#2b5bd7; --bubble:#f1ede6; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.05);
-  --seat:#fbf8f3; --wood:#d9b48a; --wood-hi:#ecd2b0; --wood-ink:#3b2a1a; --have-rim:#3aa76d; --owe-rim:#e0674f;
+  --page:#eef1f6; --surface:#ffffff; --line:#dde2ea; --ink:#132039; --muted:#5d677a; --hair:#dde2ea;
+  --table:#16284a; --table-hi:#22396a; --on-table:#f3f6fb;
+  --have:#1f8a6b; --owe:#cc4058; --good:#1f8a6b; --watch:#c98a06; --concern:#cc4058;
+  --good-soft:#e2f3ed; --watch-soft:#fbf1da; --concern-soft:#fbe5e9;
+  --accent:#2c56d8; --accent-ink:#ffffff; --focus:0 0 0 3px rgba(44,86,216,.35);
+  --lift:0 1px 2px rgba(19,32,57,.06),0 8px 24px rgba(19,32,57,.07);
 }
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
-  --bg:#141311; --card:#1e1c19; --ink:#f2eee8; --muted:#a39d93; --line:#33302b;
-  --good-bg:#16301f; --watch-bg:#33280f; --concern-bg:#3a1915; --bubble:#2a2723; --shadow:none; --accent:#7ea2ff;
-  --seat:#4a443c; --wood:#5a4330; --wood-hi:#6d523b; --wood-ink:#f6e9d8; --have-rim:#2f8a59; --owe-rim:#b9503d;
+  --page:#0e1524; --surface:#162037; --line:#26324d; --ink:#eef2f9; --muted:#9aa6bc; --hair:#26324d;
+  --table:#1f3563; --table-hi:#2b4580; --on-table:#f3f6fb;
+  --have:#3cb592; --owe:#e8667c; --good:#3cb592; --watch:#e3a92a; --concern:#e8667c;
+  --good-soft:#13342c; --watch-soft:#3a2f12; --concern-soft:#3d1a24;
+  --accent:#7d9bff; --accent-ink:#0e1524; --lift:0 0 0 0 transparent;
 }}
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif}
-main{max-width:980px;margin:0 auto;padding:20px 16px 60px}
-h1{font-size:22px;margin:0}
-h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:28px 0 10px;font-weight:600}
-.sub{color:var(--muted);font-size:14px}
+html,body{margin:0;background:var(--page);color:var(--ink);font:16px/1.5 Manrope,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:none;box-shadow:var(--focus);border-radius:12px}
 .num{font-variant-numeric:tabular-nums}
+main{max-width:1160px;margin:0 auto;padding:28px 24px 64px}
+@media (max-width:560px){main{padding:18px 16px 48px}}
+
+/* header */
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.bar h1{font-size:clamp(24px,3.2vw,32px);font-weight:800;letter-spacing:-.02em;margin:0;line-height:1.15}
+.bar .asof{color:var(--muted);font-size:14px}
+
+/* layout: the table on the left, the conversation on the right */
+.hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(330px,1fr);gap:36px;align-items:start}
+@media (max-width:900px){.hero{grid-template-columns:minmax(0,1fr);gap:12px}}
+.hero > div{min-width:0}
 
 /* the round table */
-.top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
-.stage{position:relative;width:100%;max-width:640px;margin:8px auto 0;aspect-ratio:1/.86}
-@media (max-width:560px){.stage{aspect-ratio:1/1.02}}
-.table{position:absolute;left:50%;top:46%;width:44%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
-  background:conic-gradient(from 180deg,var(--owe-rim) 0 50%,var(--have-rim) 50% 100%);padding:clamp(8px,2.2%,14px);box-shadow:0 18px 40px rgba(60,40,20,.18)}
-.table .top-surface{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 38%,var(--wood-hi),var(--wood) 75%);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--wood-ink);padding:10%}
-.table .lbl{font-size:clamp(10px,2.6vw,13px);opacity:.75;letter-spacing:.04em;text-transform:uppercase}
-.table .nwv{font-size:clamp(20px,5.4vw,32px);font-weight:800;line-height:1.1;margin:2px 0 6px}
-.table .hv,.table .ov{font-size:clamp(11px,2.9vw,14px);font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap}
-.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-.dot.h{background:var(--have-rim)}.dot.o{background:var(--owe-rim)}
-.side{position:absolute;top:46%;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;transform:translateY(-50%);writing-mode:vertical-rl}
-.side.l{left:0;transform:translateY(-50%) rotate(180deg)}.side.r{right:0}
-@media (max-width:560px){.side{display:none}}
+.stage{position:relative;width:100%;max-width:600px;aspect-ratio:1/1;margin:28px auto 0}
+@media (max-width:560px){.stage{margin-top:8px;aspect-ratio:1/1.08}.table{width:40%}}
+.table{position:absolute;left:50%;top:50%;width:47%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+  padding:9px;background:conic-gradient(var(--have) 0 var(--have-pct),var(--owe) var(--have-pct) 100%);
+  box-shadow:0 24px 48px -16px rgba(19,32,57,.45)}
+.table .top{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 30%,var(--table-hi),var(--table) 70%);
+  color:var(--on-table);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12%}
+.table .k{font-size:clamp(11px,2.6vw,13.5px);opacity:.72;font-weight:500}
+.table .nw{font-size:clamp(22px,5.6vw,36px);font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:2px 0 10px}
+.table .split{display:grid;gap:2px;font-size:clamp(11px,2.7vw,13.5px);font-weight:600}
+.table .split span{display:flex;align-items:center;gap:6px;justify-content:center;white-space:nowrap}
+.key{width:8px;height:8px;border-radius:50%}
+.key.h{background:var(--have)}.key.o{background:var(--owe)}
 
-.seat{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;width:clamp(80px,23%,140px);
-  background:none;border:0;padding:0;cursor:pointer;color:inherit;font:inherit;transition:opacity .3s,transform .3s}
-.seat:hover .av,.seat:focus-visible .av{transform:scale(1.06)}
-.av{position:relative;width:clamp(56px,14vw,84px);aspect-ratio:1;border-radius:50%;background:var(--seat);border:4px solid var(--line);overflow:hidden;
-  box-shadow:0 4px 14px rgba(0,0,0,.12);transition:transform .2s}
-.av svg{position:absolute;left:0;top:10%;width:100%}
-.seat.coach .av{border-color:var(--accent)}.seat.good .av{border-color:var(--good)}.seat.watch .av{border-color:var(--watch)}.seat.concern .av{border-color:var(--concern)}
-.plate{position:relative;margin-top:-9px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:3px 9px 4px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.08);min-width:76%}
-.plate .n{font-size:clamp(11.5px,3vw,13.5px);font-weight:600;white-space:nowrap}
-.plate .b{font-size:clamp(14px,3.8vw,18px);font-weight:800;line-height:1.15}
-.plate .ch{font-size:clamp(10.5px,2.8vw,12px);color:var(--muted);white-space:nowrap}
-.seat.dim{opacity:.4}
-.seat.hit .av{animation:bob .6s ease 2}
-.seat.hit .av:after{content:"💬";position:absolute;right:-2px;top:-2px;font-size:16px}
-@keyframes bob{50%{transform:translateY(-6px)}}
-@media (prefers-reduced-motion:reduce){.seat.hit .av{animation:none}}
-.tap{text-align:center;font-size:13px;color:var(--muted);margin-top:4px}
+.seat{position:absolute;transform:translate(-50%,-50%);width:clamp(96px,27%,150px);display:flex;flex-direction:column;align-items:center;
+  background:none;border:0;padding:0;cursor:pointer;transition:opacity .35s}
+.av{position:relative;width:clamp(58px,15vw,84px);aspect-ratio:1;border-radius:50%;overflow:hidden;background:var(--tint);
+  box-shadow:0 0 0 3px var(--surface),0 0 0 6px var(--ring),var(--lift);transition:transform .2s}
+.av svg{position:absolute;left:0;top:9%;width:100%}
+.seat:hover .av{transform:translateY(-2px)}
+.seat.good{--ring:var(--good)}.seat.watch{--ring:var(--watch)}.seat.concern{--ring:var(--concern)}
+.plate{margin-top:10px;text-align:center;line-height:1.25}
+.plate .n{font-size:clamp(12px,3.1vw,14px);font-weight:600;color:var(--muted);white-space:nowrap}
+.plate .b{font-size:clamp(15px,4vw,20px);font-weight:800;letter-spacing:-.01em}
+.plate .d{font-size:clamp(11px,2.9vw,12.5px);font-weight:700;white-space:nowrap}
+.plate .d.down{color:var(--concern)}.plate .d.up{color:var(--good)}
+.seat.quiet{opacity:.38}
+.seat.moved .av{animation:pulse 1.4s ease-out 1}
+@keyframes pulse{0%{box-shadow:0 0 0 3px var(--surface),0 0 0 6px var(--ring),0 0 0 6px var(--ring)}100%{box-shadow:0 0 0 3px var(--surface),0 0 0 6px var(--ring),0 0 0 22px transparent}}
+@media (prefers-reduced-motion:reduce){.seat.moved .av{animation:none}}
+.hint{text-align:center;color:var(--muted);font-size:13.5px;margin:-4px 0 0}
 
-/* coach says + reactions */
-.say{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-top:14px;box-shadow:var(--shadow)}
-.say .who{font-size:13px;color:var(--muted)}
-.say .msg{font-size:17px;font-weight:500;margin-top:2px}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-.chip{font-size:13px;padding:3px 9px;border-radius:99px}
-.chip.good{background:var(--good-bg);color:var(--good)}.chip.watch{background:var(--watch-bg);color:var(--watch)}.chip.concern{background:var(--concern-bg);color:var(--concern)}
-.say.ok{background:var(--good-bg)}.say.no{background:var(--concern-bg)}
-.chat{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
-.chat li{display:flex;gap:10px;align-items:flex-start}
-.chat .mini{width:38px;height:38px;flex:none;border-radius:50%;background:var(--seat);border:2px solid var(--line);overflow:hidden;position:relative}
-.chat .mini svg{position:absolute;top:8%;left:0;width:100%}
-.chat .bub{background:var(--card);border:1px solid var(--line);border-radius:4px 14px 14px 14px;padding:8px 11px;font-size:14.5px}
-.chat .bub b{font-size:13px}
-.chat li.same{opacity:.55}
-.ba{font-size:13px;color:var(--muted);margin-top:3px}.ba b{color:var(--ink);font-size:13px}
-.bub{background:var(--bubble);border-radius:14px;padding:9px 11px;font-size:14.5px}
+/* right column */
+.panel{background:var(--surface);border-radius:20px;box-shadow:var(--lift);padding:22px;border:1px solid var(--hair)}
+.panel + .panel{margin-top:16px}
+.panel h2{font-size:18px;font-weight:700;letter-spacing:-.01em;margin:0 0 4px}
+.panel p.lede{margin:0 0 14px;color:var(--muted);font-size:14.5px}
+.ask{display:flex;gap:8px;background:var(--page);border:1px solid var(--hair);border-radius:14px;padding:6px}
+.ask:focus-within{box-shadow:var(--focus);border-color:var(--accent)}
+.ask input{flex:1;min-width:0;border:0;background:none;padding:10px 10px;font-size:16px;outline:none}
+.ask input::placeholder{color:var(--muted)}
+.go{border:0;border-radius:10px;padding:0 18px;background:var(--accent);color:var(--accent-ink);font-weight:700;cursor:pointer;white-space:nowrap}
+.go:disabled{opacity:.6;cursor:progress}
+.ideas{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.idea{border:1px solid var(--hair);background:none;border-radius:999px;padding:6px 12px;font-size:13.5px;color:var(--ink);cursor:pointer}
+.idea:hover{border-color:var(--accent);color:var(--accent)}
+.err-line{margin:10px 2px 0;color:var(--concern);font-size:14px}
 
-/* decisions */
-.try{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;box-shadow:var(--shadow)}
-.opts{display:flex;gap:8px;flex-wrap:wrap}
-.opt{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:99px;padding:8px 13px;font:inherit;font-size:14.5px;cursor:pointer}
-.opt[aria-pressed="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
-.ask{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
-.ask label{font-size:15px}
-.ask input{font:inherit;font-size:17px;flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
-.go{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer}
-.go:disabled{opacity:.5}
-.ask{flex-wrap:nowrap;margin-top:0}
-@media (max-width:420px){.ask{flex-wrap:wrap}.ask .go{width:100%}}
-.tries{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px}
-.tries .opt{font-size:13.5px;padding:6px 11px}
-.notice{margin-top:10px;font-size:14.5px;color:var(--concern)}
-.verdict{margin-top:12px;padding:10px 12px;border-radius:12px;font-weight:500;display:none}
-.verdict.ok{background:var(--good-bg)}.verdict.no{background:var(--concern-bg)}
-.reset{background:none;border:0;color:var(--accent);font:inherit;font-size:15px;cursor:pointer;padding:0;margin-top:8px;display:inline-block}
+.verdict{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;margin:12px 0 4px}
+.verdict.ok{background:var(--good-soft)}.verdict.no{background:var(--concern-soft)}
+.badge{flex:none;font-size:12.5px;font-weight:700;padding:3px 10px;border-radius:999px;margin-top:2px}
+.ok .badge{background:var(--good);color:#fff}.no .badge{background:var(--concern);color:#fff}
+.verdict p{margin:0;font-weight:600;font-size:15.5px}
+.replies{list-style:none;margin:8px 0 0;padding:0}
+.replies li{display:grid;grid-template-columns:40px 1fr;gap:12px;padding:12px 0;border-top:1px solid var(--hair)}
+.replies li:first-child{border-top:0}
+.mini{width:40px;height:40px;border-radius:50%;overflow:hidden;position:relative;background:var(--tint)}
+.mini svg{position:absolute;left:0;top:9%;width:100%}
+.replies .who{font-weight:700;font-size:14.5px}
+.replies .say{font-size:15px}
+.delta{display:inline-flex;gap:6px;align-items:center;margin-top:6px;font-size:13px;font-weight:600;color:var(--muted);background:var(--page);border-radius:8px;padding:3px 8px}
+.delta b{color:var(--ink)}
+.unchanged{color:var(--muted);font-size:14px;margin:10px 0 0}
+.clear{margin-top:14px;border:1px solid var(--hair);background:none;border-radius:10px;padding:8px 14px;font-weight:600;cursor:pointer}
+.move p{margin:0;font-size:16px;font-weight:600}
+.health{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:14px;color:var(--muted)}
+.health span{display:flex;align-items:center;gap:7px}
+.health i{width:9px;height:9px;border-radius:50%;display:inline-block}
 
-/* timeline */
-.tl{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:12px;box-shadow:var(--shadow)}
+/* below the fold: forecast area (kept as is; a forecasting engine will replace it) */
+.section-title{font-size:18px;font-weight:700;margin:40px 0 12px;letter-spacing:-.01em}
+.tl{background:var(--surface);border:1px solid var(--hair);border-radius:20px;padding:16px;box-shadow:var(--lift)}
 .tl svg{width:100%;height:auto;display:block}
-.events{list-style:none;margin:10px 0 0;padding:0;font-size:14.5px;columns:2;column-gap:24px}
+.events{list-style:none;margin:10px 0 0;padding:0;font-size:14.5px;columns:2;column-gap:28px}
 @media (max-width:560px){.events{columns:1}}
-.events li{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);break-inside:avoid}
-.events .d{color:var(--muted);width:52px;flex:none}.events .a{margin-left:auto}
+.events li{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--hair);break-inside:avoid}
+.events .d{color:var(--muted);width:56px;flex:none}.events .a{margin-left:auto}
 .plus{color:var(--good)}.minus{color:var(--ink)}
+.foot{font-size:13px;color:var(--muted);margin-top:28px;text-align:center}
 
-/* sheet */
-.scrim{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-end;justify-content:center;z-index:9}
+/* detail sheet */
+.scrim{position:fixed;inset:0;background:rgba(14,21,36,.45);display:none;align-items:flex-end;justify-content:center;z-index:9}
 .scrim.on{display:flex}
-.sheet{background:var(--card);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
-@media (min-width:720px){.scrim{align-items:center}.sheet{border-radius:20px}}
-.sheet .head{display:flex;gap:12px;align-items:center}.sheet .fig{width:72px}
-.rows{margin:14px 0 0;padding:0;list-style:none}
-.rows li{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
-.rows small{display:block;color:var(--muted)}
-.rows .v{text-align:right;font-weight:600}
-.text{display:block;text-align:center;margin-top:16px;background:var(--accent);color:#fff;text-decoration:none;padding:12px;border-radius:12px;font-weight:600}
-.x{float:right;background:none;border:0;font-size:24px;color:var(--muted);cursor:pointer;line-height:1}
-.note{font-size:12.5px;color:var(--muted);margin-top:24px;text-align:center}
-.err{padding:40px 0;text-align:center;color:var(--muted)}
+.sheet{background:var(--surface);width:100%;max-width:480px;border-radius:22px 22px 0 0;padding:22px 22px calc(22px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;animation:rise .22s ease-out}
+@keyframes rise{from{transform:translateY(16px);opacity:.6}}
+@media (min-width:720px){.scrim{align-items:center}.sheet{border-radius:22px}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet .hd{display:flex;gap:14px;align-items:center}
+.sheet .hd .av{width:64px;flex:none;--ring:var(--hair)}
+.sheet .nm{font-weight:600;color:var(--muted)}
+.sheet .bal{font-size:28px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.pill{display:inline-block;font-size:12.5px;font-weight:700;padding:2px 9px;border-radius:999px;margin-top:4px}
+.pill.good{background:var(--good-soft);color:var(--good)}.pill.watch{background:var(--watch-soft);color:var(--watch)}.pill.concern{background:var(--concern-soft);color:var(--concern)}
+.quote{margin:16px 0 4px;font-size:15.5px;padding:12px 14px;background:var(--page);border-radius:12px}
+.rows{margin:8px 0 0;padding:0;list-style:none}
+.rows li{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair)}
+.rows small{display:block;color:var(--muted);font-size:13px}
+.rows .v{text-align:right;font-weight:700}
+.sheet h3{font-size:15px;margin:20px 0 0}
+.text{display:block;text-align:center;margin-top:18px;background:var(--accent);color:var(--accent-ink);text-decoration:none;padding:13px;border-radius:12px;font-weight:700}
+.x{float:right;width:34px;height:34px;border-radius:50%;border:0;background:var(--page);font-size:20px;line-height:1;color:var(--muted);cursor:pointer}
+.loading{padding:80px 0;text-align:center;color:var(--muted)}
 </style>
 </head>
 <body>
-<main id="app"><div class="err">Loading your huddle…</div></main>
-
-<div class="scrim" id="scrim" role="dialog" aria-modal="true"><div class="sheet" id="sheet"></div></div>
+<main id="app"><div class="loading">Setting the table…</div></main>
+<div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-label="Account details"><div class="sheet" id="sheet"></div></div>
 
 <script>
 const API = location.pathname.replace(/\/$/, "") + "/api";
@@ -136,7 +161,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const money = (n) => { const a = Math.abs(n); return (n < 0 ? "-" : "") + "$" + a.toLocaleString("en-US", { minimumFractionDigits: a % 1 ? 2 : 0, maximumFractionDigits: 2 }); };
 const M = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const day = (iso) => { const [, m, d] = iso.split("-").map(Number); return `${M[m - 1]} ${d}`; };
-const statusWord = { good: "Doing well", watch: "Keep an eye on", concern: "Needs attention" };
+const statusWord = { good: "On track", watch: "Keep an eye on", concern: "Needs attention" };
+const TINT = { checking: "#d8efec", savings: "#f8dde2", ira: "#e1f0d9", card: "#e7e0f6", car_loan: "#fbe5d3" };
 
 /* ---------- the people (original simple illustrations) ---------- */
 const LOOK = {
@@ -182,22 +208,28 @@ function figure(id, mood) {
 }
 
 /* ---------- render ---------- */
-// Where each person sits: money you have on the left, money you owe on the right, your seat at the bottom.
-const SEATS = { checking: 228, savings: 180, ira: 132, card: 318, car_loan: 42 };
-function seat(p) {
+
+// Five seats, evenly spaced (72° apart), starting at the top of the table.
+const ORDER = ["checking", "card", "car_loan", "ira", "savings"];
+function seat(p, i, n) {
   const r = result?.reactions.find((x) => x.id === p.id);
   const mood = r ? r.mood : p.mood;
-  const deg = SEATS[p.id] ?? 90, rad = (deg * Math.PI) / 180;
-  const left = 50 + 37 * Math.cos(rad), top = 46 + 42 * Math.sin(rad);
-  const cls = [p.status, result ? (r?.changed ? "hit" : "dim") : ""].join(" ");
-  const sub = r?.changed && r.after ? `<div class="ch num">→ ${esc(r.after.replace(/^lowest /, "low "))}</div>`
-    : `<div class="ch">${p.group === "owe" ? "you owe" : "you have"}</div>`;
-  return `<button class="seat ${cls}" data-id="${p.id}" style="left:${left.toFixed(1)}%;top:${top.toFixed(1)}%" aria-label="${esc(p.name)}, ${money(p.balance)}, ${statusWord[p.status]}. Tap for details.">
+  const rad = ((-90 + (360 / n) * i) * Math.PI) / 180;
+  const tall = innerWidth <= 560; // phone: a slightly taller oval so name plates clear the table
+  const left = 50 + 37 * Math.cos(rad), top = 51 + (tall ? 39 : 37) * Math.sin(rad);
+  const cls = [p.status, result ? (r?.changed ? "moved" : "quiet") : ""].join(" ");
+  let d = `<div class="d" style="color:var(--muted);font-weight:600">${p.group === "owe" ? "owed" : "held"}</div>`;
+  if (r?.changed && r.after) {
+    const n0 = Number(String(r.before).replace(/[^\d.-]/g, "")), n1 = Number(String(r.after).replace(/[^\d.-]/g, ""));
+    const better = p.group === "owe" ? n1 < n0 : n1 > n0;
+    d = `<div class="d ${better ? "up" : "down"} num">${esc(r.after.replace(/^lowest /, "low "))}</div>`;
+  }
+  return `<button class="seat ${cls}" data-id="${p.id}" style="left:${left.toFixed(1)}%;top:${top.toFixed(1)}%;--tint:${TINT[p.id] || "#eee"}" aria-label="${esc(p.name)}: ${money(p.balance)}, ${statusWord[p.status]}. Open details.">
     <div class="av">${figure(p.id, mood)}</div>
-    <div class="plate"><div class="n">${p.emoji} ${esc(p.name)}</div><div class="b num">${money(p.balance)}</div>${sub}</div>
+    <div class="plate"><div class="n">${p.emoji} ${esc(p.name)}</div><div class="b num">${money(p.balance)}</div>${d}</div>
   </button>`;
 }
-const mini = (id, mood) => `<div class="mini">${figure(id, mood)}</div>`;
+const mini = (id, mood) => `<div class="mini" style="--tint:${TINT[id] || "#eee"}">${figure(id, mood)}</div>`;
 
 function timeline(t) {
   const W = Math.round(Math.max(340, Math.min(640, (innerWidth - 56) * 1.1))), H = W < 500 ? 230 : 190, pad = { l: 46, r: 10, t: 30, b: 22 };
@@ -232,81 +264,112 @@ function timeline(t) {
   </svg>`;
 }
 
-const EXAMPLES = [
+
+const IDEAS = [
   "What if I buy a $300 TV?",
   "What if I add a $50 a month gym membership?",
   "What if I move $200 into savings?",
   "What if I pay $300 extra on my card?",
   "What if I put $100 in my IRA?",
-  "What if I lost my paycheck for 1 month?",
+  "What if I lost my paycheck for a month?",
 ];
+
+function delta(r) {
+  const low = /^lowest /;
+  const label = low.test(r.before) ? "Lowest balance " : "";
+  return `<span class="delta num">${label}${esc(r.before.replace(low, ""))} → <b>${esc(r.after.replace(low, ""))}</b></span>`;
+}
+
+function rightColumn(h) {
+  const askPanel = `<section class="panel" aria-labelledby="ask-h">
+      <h2 id="ask-h">Ask the table</h2>
+      <p class="lede">Describe a money decision. Everyone at the table shows what it would do to them.</p>
+      <form class="ask" id="ask">
+        <input id="q" type="text" maxlength="300" autocomplete="off" placeholder="What if I buy a $400 phone?" value="${esc(question)}" aria-label="Your question">
+        <button class="go" ${busy ? "disabled" : ""}>${busy ? "Asking…" : "Ask"}</button>
+      </form>
+      ${notice ? `<p class="err-line">${esc(notice)}</p>` : ""}
+      ${result ? "" : `<div class="ideas">${IDEAS.map((x) => `<button class="idea" data-q="${esc(x)}">${esc(x.replace(/^What if I /, "").replace(/\?$/, ""))}</button>`).join("")}</div>`}
+    </section>`;
+  if (result) {
+    const moved = result.reactions.filter((r) => r.changed);
+    const still = result.reactions.filter((r) => !r.changed).map((r) => h.people.find((p) => p.id === r.id)?.name).filter(Boolean);
+    return askPanel + `<section class="panel" aria-live="polite">
+      <h2>${esc(result.title)}</h2>
+      <div class="verdict ${result.safe ? "ok" : "no"}"><span class="badge">${result.safe ? "Fits" : "Careful"}</span><p>${esc(result.verdict)}</p></div>
+      <ul class="replies">${moved.map((r) => {
+        const p = h.people.find((x) => x.id === r.id);
+        return p ? `<li>${mini(p.id, r.mood)}<div><div class="who">${p.emoji} ${esc(p.name)}</div><div class="say">${esc(r.text)}</div>${r.before && r.after ? delta(r) : ""}</div></li>` : "";
+      }).join("")}</ul>
+      ${still.length ? `<p class="unchanged">No change for ${esc(still.length > 1 ? still.slice(0, -1).join(", ") + " and " + still.at(-1) : still[0])}.</p>` : ""}
+      <button class="clear" id="reset">Clear and ask again</button>
+    </section>`;
+  }
+  const c = h.coach.counts;
+  return askPanel + `<section class="panel move">
+      <h2>Your next best move</h2>
+      <p>${esc(h.coach.bestMove)}</p>
+      <div class="health">
+        ${c.concern ? `<span><i style="background:var(--concern)"></i>${c.concern} needs attention</span>` : ""}
+        ${c.watch ? `<span><i style="background:var(--watch)"></i>${c.watch} to keep an eye on</span>` : ""}
+        ${c.good ? `<span><i style="background:var(--good)"></i>${c.good} on track</span>` : ""}
+      </div>
+    </section>`;
+}
 
 function render() {
   const h = data.huddle;
-  const c = h.coach.counts;
-  const all = h.people;
+  const people = ORDER.map((id) => h.people.find((p) => p.id === id)).filter(Boolean)
+    .concat(h.people.filter((p) => !ORDER.includes(p.id)));
+  const havePct = ((h.have / (h.have + h.owe || 1)) * 100).toFixed(1);
   $("#app").innerHTML = `
-    <div class="top"><div><h1>${esc(h.firstName ? h.firstName + "'s" : "Your")} money huddle</h1>
-      <div class="sub">Everyone at one table · ${esc(day(h.localDate))}</div></div></div>
-
-    <div class="stage">
-      <div class="side l">Holding your money</div><div class="side r">What you owe</div>
-      <div class="table"><div class="top-surface">
-        <div class="lbl">Net worth</div><div class="nwv num">${money(h.netWorth)}</div>
-        <div class="hv num"><span class="dot h"></span>have ${money(h.have)}</div>
-        <div class="ov num"><span class="dot o"></span>owe ${money(h.owe)}</div>
-      </div></div>
-      ${all.map(seat).join("")}
-    </div>
-    <div class="tap">Tap anyone at the table to see their details</div>
-
-    <h2>Ask “what if…”</h2>
-    <div class="try">
-      <form class="ask" id="ask">
-        <input id="q" type="text" maxlength="300" autocomplete="off" placeholder="What if I buy a $400 phone?" value="${esc(question)}" aria-label="Ask a what-if question">
-        <button class="go" ${busy ? "disabled" : ""}>${busy ? "Thinking…" : "Ask the table"}</button>
-      </form>
-      ${notice ? `<div class="notice">${esc(notice)}</div>` : ""}
-      <div class="tries"><span class="sub">Or try:</span> ${EXAMPLES.map((x) => `<button class="opt" data-q="${esc(x)}">${esc(x.replace(/^What if I /, "").replace(/\?$/, ""))}</button>`).join("")}</div>
+    <header class="bar">
+      <h1>${esc(h.firstName ? h.firstName + "'s money, at one table" : "Your money, at one table")}</h1>
+      <span class="asof">As of ${esc(day(h.localDate))}</span>
+    </header>
+    <div class="hero">
+      <div>
+        <div class="stage">
+          <div class="table" style="--have-pct:${havePct}%" role="img" aria-label="Net worth ${money(h.netWorth)}: you have ${money(h.have)} and owe ${money(h.owe)}">
+            <div class="top">
+              <div class="k">Net worth</div>
+              <div class="nw num">${money(h.netWorth)}</div>
+              <div class="split num"><span><i class="key h"></i>Have ${money(h.have)}</span><span><i class="key o"></i>Owe ${money(h.owe)}</span></div>
+            </div>
+          </div>
+          ${people.map((p, i) => seat(p, i, people.length)).join("")}
+        </div>
+        <p class="hint">Tap anyone for details</p>
+      </div>
+      <div>${rightColumn(h)}</div>
     </div>
 
-    <div class="say ${result ? (result.safe ? "ok" : "no") : ""}">
-      <div class="who">${result ? esc(result.title) : "Your next best move"}</div>
-      <div class="msg">${result ? "Bottom line: " : ""}${esc(result ? result.verdict : h.coach.bestMove)}</div>
-      ${result ? `<ul class="chat">${result.reactions.map((r) => {
-          const p = h.people.find((x) => x.id === r.id);
-          return p ? `<li class="${r.changed ? "" : "same"}">${mini(p.id, r.mood)}<div class="bub"><b>${p.emoji} ${esc(p.name)}</b><br>${esc(r.text)}${r.before && r.after ? `<div class="ba num">${esc(r.before)} → <b>${esc(r.after)}</b></div>` : ""}</div></li>` : "";
-        }).join("")}</ul><button class="reset" id="reset">← Back to today</button>`
-        : `<div class="chips">${c.concern ? `<span class="chip concern">${c.concern} needs attention</span>` : ""}${c.watch ? `<span class="chip watch">${c.watch} to keep an eye on</span>` : ""}${c.good ? `<span class="chip good">${c.good} doing well</span>` : ""}</div>`}
-    </div>
-
-    <h2>Next 6 weeks in Checking</h2>
+    <h2 class="section-title">Next 6 weeks in Checking</h2>
     <div class="tl">${timeline(h.timeline)}
       <ul class="events">${h.timeline.marks.map((m) => {
-        const who = all.find((p) => p.id === m.who);
+        const who = h.people.find((p) => p.id === m.who);
         return `<li><span class="d">${day(m.date)}</span><span>${m.sign === "+" ? "💰" : who?.emoji || ""} ${esc(m.label)}</span><span class="a num ${m.sign === "+" ? "plus" : "minus"}">${m.sign === "+" ? "+" : "−"}${money(m.amount)}</span></li>`;
       }).join("")}</ul>
     </div>
-    <p class="note">Nobody at this table can move your money. They only explain and suggest.${data.source !== "live" ? " (sample data)" : ""}</p>`;
+    <p class="foot">Nobody at this table can move your money. They explain and suggest; you decide.${data.source !== "live" ? " Showing sample data." : ""}</p>`;
 }
 
 function openSheet(id) {
-  const h = data.huddle;
-  const p = h.people.find((x) => x.id === id);
+  const p = data.huddle.people.find((x) => x.id === id);
   if (!p) return;
   const sms = data.agentHandle ? `sms:${encodeURIComponent(data.agentHandle)}&body=${encodeURIComponent("@" + p.name + " ")}` : null;
   $("#sheet").innerHTML = `<button class="x" aria-label="Close" id="close">×</button>
-    <div class="head"><div class="fig">${figure(p.id, p.mood)}</div><div><div class="name"><b>${p.emoji} ${esc(p.name)}</b></div><div class="sub">${statusWord[p.status]}</div></div></div>
-    <div class="bub" style="margin-top:12px">${esc(p.says)}</div>
+    <div class="hd"><div class="av" style="--tint:${TINT[p.id]}">${figure(p.id, p.mood)}</div>
+      <div><div class="nm">${p.emoji} ${esc(p.name)}</div><div class="bal num">${money(p.balance)}</div><span class="pill ${p.status}">${statusWord[p.status]}</span></div></div>
+    <div class="quote">${esc(p.says)}</div>
     <ul class="rows">${p.detail.map((r) => `<li><span>${esc(r.label)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span><span class="v num">${esc(r.value)}</span></li>`).join("")}</ul>
-    ${p.upcoming.length ? `<h2>Coming up</h2><ul class="rows">${p.upcoming.map((u) => `<li><span>${day(u.date)} · ${esc(u.label)}</span><span class="v num ${u.sign === "+" ? "plus" : ""}">${u.sign === "+" ? "+" : "−"}${money(u.amount)}</span></li>`).join("")}</ul>` : ""}
+    ${p.upcoming.length ? `<h3>Coming up</h3><ul class="rows">${p.upcoming.map((u) => `<li><span>${esc(u.label)}<small>${day(u.date)}</small></span><span class="v num ${u.sign === "+" ? "plus" : ""}">${u.sign === "+" ? "+" : "−"}${money(u.amount)}</span></li>`).join("")}</ul>` : ""}
     ${sms ? `<a class="text" href="${sms}">Text ${esc(p.name)}</a>` : ""}`;
   $("#scrim").classList.add("on");
   $("#close").focus();
 }
 const closeSheet = () => $("#scrim").classList.remove("on");
 
-/* ---------- events ---------- */
 async function ask(text) {
   question = text.trim();
   if (!question) return $("#q").focus();
@@ -314,39 +377,35 @@ async function ask(text) {
   try {
     const r = await fetch(API + "/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: question }) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) notice = j.error || "Something went wrong. Try again.";
-    else if (!j.understood) notice = "I couldn't tell what you meant. Try including an amount, like “buy a $300 TV” or “move $200 to savings”.";
+    if (!r.ok) notice = j.error || "That didn't go through. Try again.";
+    else if (!j.understood) notice = "Include an amount so the table can work it out, like “buy a $300 TV” or “move $200 to savings”.";
     else result = j.result;
-  } catch { notice = "Couldn't reach the table. Try again."; }
+  } catch { notice = "Can't reach the table right now. Check your connection and try again."; }
   busy = false; render();
-  // Wide screens see the table and the replies together; on a phone, jump to the replies.
-  if (result && !notice) (innerWidth < 720 ? $(".say") : $(".stage")).scrollIntoView({ behavior: "smooth", block: "start" });
+  if (result && !notice && innerWidth < 900) $(".panel[aria-live]")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 document.addEventListener("click", (e) => {
-  const opt = e.target.closest(".opt");
-  if (opt) return ask(opt.dataset.q);
-  if (e.target.id === "reset") { result = null; question = ""; render(); return; }
+  const idea = e.target.closest(".idea");
+  if (idea) return ask(idea.dataset.q);
+  if (e.target.id === "reset") { result = null; question = ""; render(); $("#q").focus(); return; }
   if (e.target.id === "close" || e.target.id === "scrim") return closeSheet();
-  const p = e.target.closest(".seat");
-  if (p) openSheet(p.dataset.id);
+  const s = e.target.closest(".seat");
+  if (s) openSheet(s.dataset.id);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
 document.addEventListener("input", (e) => { if (e.target.id === "q") question = e.target.value; });
-document.addEventListener("submit", (e) => {
-  if (e.target.id !== "ask") return;
-  e.preventDefault();
-  ask($("#q").value);
-});
+document.addEventListener("submit", (e) => { if (e.target.id === "ask") { e.preventDefault(); ask($("#q").value); } });
 
 async function load() {
   try {
     const r = await fetch(API);
-    if (r.status === 404) { $("#app").innerHTML = `<div class="err"><h2>This link has expired</h2>Text “how am I doing?” to get a new one.</div>`; return; }
+    if (r.status === 404) { $("#app").innerHTML = `<div class="loading"><h2>This link has expired</h2>Text “how am I doing?” to get a new one.</div>`; return; }
     data = await r.json();
-    if (!$("#scrim").classList.contains("on") && !result && document.activeElement?.id !== "q" && !busy) render();
-  } catch { if (!data) $("#app").innerHTML = `<div class="err">Couldn't load right now. Pull to refresh.</div>`; }
+    if (!$("#scrim").classList.contains("on") && !result && !busy && document.activeElement?.id !== "q") render();
+  } catch { if (!data) $("#app").innerHTML = `<div class="loading">Can't load your table right now. Refresh to try again.</div>`; }
 }
 load();
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => data && !busy && render(), 150); });
 setInterval(load, 10000); // stays current while money moves (paused during a what-if)
 </script>
 </body>
