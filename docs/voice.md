@@ -9,7 +9,7 @@ Owner: P4 (Rishi). Setup notes, findings, and the runbook for phone calls. Code 
 | SMS number purchased | done | +1 (828) 647-2114, on the Default voice profile. Shared iMessage lines can't take calls, so voice needs this number. |
 | Default SIP voice profile | in progress | Destination to set: `sip:+18286472114@sip.rtc.elevenlabs.io:5061;transport=tls` (TLS; or `sips:+18286472114@sip.rtc.elevenlabs.io:5061` if Photon wants the sips form) |
 | ElevenLabs agent created | done | "Huddlr Coach", `agent_0701m6w7dzcvfj4rky8zejyee2we`, created by `npm run setup:elevenlabs`. LLM default gemini-2.0-flash |
-| Number imported into ElevenLabs (TLS) | done | `phnum_3701m6w7e19mf4b95b4jgpnpn0s3`, outbound to `sip.spectrum.photon.codes` TLS, assigned to the agent |
+| Number imported into ElevenLabs (TLS) | done | `phnum_3701m6w7e19mf4b95b4jgpnpn0s3`, outbound to `sip.photon.codes` TLS (5061) with the Default profile's SIP username/password (`PHOTON_SIP_USERNAME`/`PHOTON_SIP_PASSWORD`); re-apply with `npm run setup:elevenlabs -- --update-number`. If outbound gets 401/407, switch the profile's digest from SHA-256 to MD5, assigned to the agent |
 | Inbound test call, audio both ways | not started | |
 | Outbound credentials + test call | not started | |
 | Voice service code (context, post-call, emergency call) | done | merged in #6, #7 |

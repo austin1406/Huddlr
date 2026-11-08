@@ -144,7 +144,7 @@ test("setup: agent body references secrets by id, never by value", async () => {
     assert.ok(v in DYNAMIC_PLACEHOLDERS, v);
   }
   const p = phoneBody({ phoneNumber: "+18286472114", agentId: "ag", sipUser: "prj", sipPassword: "pw" });
-  assert.equal(p.outbound_trunk_config.address, "sip.spectrum.photon.codes");
+  assert.equal(p.outbound_trunk_config.address, "sip.photon.codes");
   assert.equal(p.outbound_trunk_config.transport, "tls");
 });
 
