@@ -10,7 +10,11 @@ export const isHuddleLinkRequest = (text: string | null | undefined): boolean =>
   if (!t || t.length > 120) return false;
   if (/\bhuddle\b/.test(t) && /\b(link|url|page|site|open|send|resend|new|again|where|wheres|access|get|give|table|view)\b/.test(t)) return true;
   if (/^(huddle|my huddle|the huddle)[.!?]*$/.test(t)) return true;
-  return /^(can you |could you |pls |please )?(send|give|text|resend|get)( me)?( my| the| a)?( new)? (link|table link|dashboard link)\b/.test(t);
+  // Phone testing: "can i get the link", "where is the link", "link" went to a character, who said it can't give links.
+  if (/^(the |my |a )?(new )?(link|dashboard|dashboard link|table link)[.!?]*$/.test(t)) return true;
+  if (/^(where|wheres|where is)( is)? (the|my) (link|dashboard|table)\b/.test(t)) return true;
+  if (/^(can|could|may) (i|u|you) (get|have|see|send me|give me|text me|resend)( me)?( the| a| my)?( new)? (link|dashboard|dashboard link|table link|table)\b/.test(t)) return true;
+  return /^(can you |could you |can u |pls |please )?(send|give|text|resend|get)( me)?( my| the| a)?( new)? (link|table link|dashboard link)\b/.test(t);
 };
 
 export type HuddleLink = (phone: string) => Promise<string | null>;
