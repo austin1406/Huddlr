@@ -1,6 +1,6 @@
 // A text that isn't an answer to a proposal: remember any goal or preference in it, then let the right
 // character answer (one speaker, grounded like everything else).
-import type { CharacterId, FactsSnapshot } from "../../contracts/src";
+import type { CharacterId, FactsSnapshot, Plan } from "../../contracts/src";
 import { speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
@@ -40,9 +40,54 @@ export function parseWindfall(text: string): { amount: number; label: string } |
     t.match(/\b(bonus|tax refund|refund|tax return|inheritance|gift|raise|commission|side hustle|freelance|cash back|winnings|windfall|birthday money)\b/)?.[1] ?? null;
   const asks = /\bwhat should i do\b|\bwhere should (it|i put)\b|\bhow should i (use|spend|split)\b|\bwhat do i do with\b|\bshould i (save|invest|pay)\b/.test(t);
   if (!kind && !(asks && /\b(extra|got|have|received|made|earned)\b/.test(t))) return null;
-  const money = extractNumbers(text).filter((n) => n.kind === "money");
+  // "$600", or a bare "600" when a windfall word makes clear it's money.
+  const nums = extractNumbers(text);
+  let money = nums.filter((n) => n.kind === "money");
+  if (!money.length && kind) money = nums.filter((n) => n.kind === "number" && (n.value ?? 0) >= 20);
   if (money.length !== 1 || !money[0].value || money[0].value <= 0) return null;
   return { amount: money[0].value, label: kind ? `the user got ${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind}` : "the user has extra money" };
+}
+
+/** "why am I moving…", "what about the 600?", "so where do I put it??": a question about what was just proposed. */
+export function isFollowUp(text: string): boolean {
+  return /\b(why|what about|where (do|should|does) i|so where|which one|confus\w*|explain|instead|huh|wait|what does (that|this) mean|i don'?t get)\b|\?\?/i.test(text);
+}
+
+const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+
+/** The pending proposal, with its plan spelled out in words (built from the plan's own numbers). */
+async function pendingPlan(db: Queryable, phone: string) {
+  const r = await db.query<{ action_text: string; source_event_id: string | null; plan: Plan | string }>(
+    "SELECT action_text, source_event_id, plan FROM proposals WHERE user_phone = $1 AND status = 'pending' ORDER BY id DESC LIMIT 1",
+    [phone],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  const plan = (typeof row.plan === "string" ? JSON.parse(row.plan) : row.plan) as Plan;
+  const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const windfall = row.source_event_id?.startsWith("chat_windfall_");
+  const split = plan.lines
+    .map((l) => {
+      const to = ACCOUNT_NAMES[String(l.destination)] ?? String(l.destination);
+      if (windfall && l.destination === "checking") return `keep ${usd(l.amount)} in Checking (${l.reasonCode.replace(/_/g, " ")}; the new money is already there)`;
+      return `${usd(l.amount)} to ${to} (${l.reasonCode.replace(/_/g, " ")})`;
+    })
+    .join("; ");
+  // For the Coach's "who is right" rule (it follows the first line): for a bonus, lead with where money moves.
+  const coachPlan = windfall ? { ...plan, lines: [...plan.lines.filter((l) => l.destination !== "checking"), ...plan.lines.filter((l) => l.destination === "checking")] } : plan;
+  return { actionText: row.action_text, source: row.source_event_id, plan, coachPlan, planAmount: plan.amount, split };
+}
+
+/** The last few texts both ways (not counting this one), as "you: …" / "Savings: …" lines, plus every number in them. */
+async function recentConversation(db: Queryable, phone: string, inboundId: number, limit = 8) {
+  const r = await db.query<{ direction: string; speaker: string; text: string }>(
+    "SELECT direction, speaker, text FROM memory_messages WHERE user_phone = $1 AND channel = 'text' AND (inbound_id IS NULL OR inbound_id <> $2) ORDER BY id DESC LIMIT $3",
+    [phone, inboundId, limit],
+  );
+  const rows = r.rows.reverse();
+  const lines = rows.map((m) => (m.direction === "in" ? `you: ${m.text}` : `${ACCOUNT_NAMES[m.speaker] ?? (m.speaker === "coach" ? "Coach" : m.speaker)}: ${m.text}`));
+  const numbers = rows.flatMap((m) => extractNumbers(m.text).flatMap((n) => (n.value != null ? [n.value] : [])));
+  return { lines, numbers };
 }
 
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
@@ -81,10 +126,14 @@ export async function handleChat(
     return { learned: 0, responder: "coach" };
   }
 
+  const pending = await pendingPlan(deps.db, deps.userPhone);
+
   // "I got a $600 bonus, what should I do?" gets the whole crew: a debate and a plan to say YES to.
-  // An @-mention means the user wants one voice, so it skips this.
+  // An @-mention means the user wants one voice, so it skips this. Asking again about the same bonus while its plan
+  // is still waiting ("so where do I put the 600??") is a follow-up: the Coach explains that plan instead of re-running it.
   const windfall = !parseMention(text) && deps.windfall ? parseWindfall(text) : null;
-  if (windfall && deps.windfall) {
+  const sameWindfall = windfall && pending?.source?.startsWith("chat_windfall_") && pending.planAmount === windfall.amount;
+  if (windfall && deps.windfall && !sameWindfall) {
     const r = await deps.windfall({ inboundId: inbound.id, text, ...windfall }, now);
     return { learned: 0, responder: "coach", debate: r.speakers };
   }
@@ -97,18 +146,38 @@ export async function handleChat(
   }
 
   // "@savings ..." picks the speaker; otherwise route by topic. A bare "@savings" is a check-in.
+  // A question about the plan that's waiting ("why am I moving $152?", "what about the 600?") goes to the Coach,
+  // who made the plan, unless the user tagged someone.
   const mention = parseMention(text);
-  const responder = mention?.who ?? pickResponder(text);
+  const followUp = !mention && pending != null && (sameWindfall || isFollowUp(text));
+  const responder = mention?.who ?? (followUp ? "coach" : pickResponder(text));
   const question = mention ? mention.rest || "How am I doing with you right now?" : text;
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
+  const recent = await recentConversation(deps.db, deps.userPhone, inbound.id);
   const ask = mention
     ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
     : `The user texted: "${question}". Answer them directly in character.`;
-  const r = await speak(responder, facts, `${ask}${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}`, {
+  const context = [
+    ...(recent.lines.length ? [`RECENT CONVERSATION (oldest first):`, ...recent.lines] : []),
+    ...(pending ? [`THE PLAN WAITING FOR THEIR YES: "${pending.actionText}". The full plan: ${pending.split}.`] : []),
+    ...(recent.lines.length || pending
+      ? [`Answer their latest text as part of this conversation, not from scratch. If they're confused about the plan, explain plainly what it does and why, with its numbers. Never contradict the waiting plan or invent a different one.`]
+      : []),
+  ].join("\n");
+  const r = await speak(responder, facts, `${ask}${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}${context ? `\n${context}` : ""}`, {
     model: deps.model,
-    // Numbers the user typed themselves ("can I afford $40?") are fair to repeat back.
-    extraSources: [...goals.map((g) => g.value), extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : []))],
+    // The Coach explaining the waiting plan is held to the same code-enforced rules as in a debate: the exact YES line,
+    // and nobody is called "right" who didn't speak just now (no "Savings is right because…" out of nowhere).
+    ...(followUp && pending ? { plan: pending.coachPlan, ask: pending.actionText, heard: [] } : {}),
+    // Numbers the user typed themselves ("can I afford $40?"), and numbers already said in this conversation
+    // (each was grounded when it was sent), are fair to repeat back.
+    extraSources: [
+      ...goals.map((g) => g.value),
+      extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : [])),
+      recent.numbers,
+      ...(pending ? [pending.plan] : []),
+    ],
   });
   await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: r.text });
   return { learned: 0, responder };

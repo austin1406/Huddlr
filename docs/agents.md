@@ -87,7 +87,11 @@ A text with one dollar amount and a windfall word (bonus, refund, tax return, gi
 argues with one rival, and the Coach closes with "Reply YES to: …". It's a reply, so the daily cap and quiet hours
 don't apply, and there's a reminder later but never a call. A new plan replaces any plan still waiting, so YES always
 approves what the latest message asked. `@savings I got a bonus…` still gets one voice.
-Try it with real Gemini: `npx tsx scripts/try-windfall.ts`.
+The bonus is already in Checking, so a Checking line in P1's plan means "keep this much there" (when short before
+payday), never a transfer into Checking; the YES moves the rest out of Checking ("Move $457.00 from Checking to Card").
+Follow-ups ("why…", "what about the 600?") go to the Coach with the last few texts and the waiting plan, under the
+same YES-line and "who is right" rules as a debate; asking about the same bonus again explains the plan instead of
+starting a new one. Replay the phone conversation with real Gemini: `npx tsx scripts/try-windfall.ts`.
 
 ## Rules that are tested
 
