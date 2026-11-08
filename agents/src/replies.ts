@@ -12,6 +12,10 @@ export type HandleResult =
   | { kind: "chat" }
   | { kind: "accepted" | "declined" | "expired" | "clarify" | "noop"; proposalId: number };
 
+/** "so what should i do", "what now", "what's the bottom line", "tldr", "i don't know what to do". */
+export const isBottomLineQuestion = (text: string) =>
+  /\b(what (?:should|do|can) i (?:do|pick|choose)|what(?:'s| is)? (?:the )?(?:bottom line|move|play|takeaway|plan)|what now|now what|so what\b(?! about)|tl;?dr|bottom line|what do you (?:want|need) me to do|(?:don'?t|dont) know what to do|which (?:one|should i))\b/i.test(text);
+
 /**
  * Short texts with a pending plan are treated as answers to it ("maybe", "ok wait"); longer ones are conversation.
  * An @-mention or a question is never an answer: "@savings how am I doing" must reach Savings even while a plan
@@ -22,6 +26,8 @@ export const looksLikeAnswer = (text: string) => {
   if (/^[@＠]/.test(t)) return false;
   if (/\?\s*$/.test(t) && !/^(yes|yeah|yep|ok|okay|sure|no|nope|maybe|wait|hm+|huh)\b/i.test(t)) return false;
   if (/^(how|what|what's|whats|why|where|when|which|who|can|could|should|would|is|am|are|do|does|did|will|tell me|show me|explain)\b/i.test(t)) return false;
+  // "so what should i do", "ok so what now", "i don't know what to do": asking for the bottom line, not answering.
+  if (isBottomLineQuestion(t)) return false;
   return t.split(/\s+/).length <= 6;
 };
 
@@ -66,7 +72,9 @@ export async function handleInbound(
     }
     return { kind: "chat" };
   }
-  if (intent === "unclear" && (isRecallQuestion(text) || !looksLikeAnswer(text))) return { kind: "chat" };
+  // Anything that isn't a clear YES or NO is conversation: answer it, never hold the user up for a YES/NO.
+  // (Only a clear YES approves; the user moves the money themselves anyway.)
+  if (intent === "unclear") return { kind: "chat" };
 
   const id = Number(pending.id);
   const say = sayAbout(id);

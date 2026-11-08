@@ -7,6 +7,7 @@
 // Budgets: first message ~5 s, plan ~15 s (real clock, latency). Round 2 is skipped for now: one round fits the
 // budget and keeps the chat quiet. Calendar decisions (quiet hours, cap) use the simulated clock.
 import { localDate, type CharacterId, type FactsSnapshot, type FinanceEvent, type Plan, type ProposalService } from "../../contracts/src";
+import { bottomLine } from "./bottomline";
 import { celebration, celebrationTiming } from "./celebrate";
 import { describePriorities, fromFor, leadWith, loadPriorities, pickLine, type Priorities } from "./priorities";
 import { character, config, speak, type SpeakResult } from "./character";
@@ -37,7 +38,7 @@ export interface DebateResult {
   planMs: number | null;
 }
 
-const ACCOUNT_LABEL: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+const ACCOUNT_LABEL: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Loan", ira: "IRA" };
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** How much money the Coach is planning for. Null means comment only, no plan. */
@@ -100,7 +101,10 @@ async function speakInTurn(
     const deadline = i === 0
       ? started + config.debate.first_message_target_ms
       : Math.min(Date.now() + config.debate.first_message_target_ms, started + config.debate.plan_target_ms - 2000);
-    const r = await say(id, [...heard], deadline);
+    const said = await say(id, [...heard], deadline);
+    // "Adding to Checking: Option: …" isn't adding to anything; it's its own option. Drop the false lead-in so it
+    // isn't threaded under a message it doesn't answer.
+    const r = { ...said, text: said.text.replace(/^(?:adding to|building on|agreed with|to add to)\s+[A-Z][\w ]{1,20}?[:,.]\s*(?=option:)/i, "") };
     const name = character(id).name;
     const outboxId = await queue(id, r.text, answering(r.text, posted));
     heard.push({ name, text: r.text });
@@ -119,10 +123,12 @@ async function hadRecentShortfall(db: Queryable, phone: string, now: Date): Prom
   return r.rows.length > 0;
 }
 
-const situation = (id: CharacterId, event: FinanceEvent) =>
+const situation = (id: CharacterId, event: FinanceEvent, hasPlan = true) =>
   id === "coach"
-    ? `The accounts just explained what this means for them: ${event.type}. Close with the plan.`
-    : `This just happened: ${event.type} ${JSON.stringify(event.data)}. Explain what it means for the user from your account's side, with one number. If you see it differently from another account, say so briefly and calmly.`;
+    ? hasPlan
+      ? `The accounts each gave an option for: ${event.type}. Close with the bottom line: which option to take first and why, then the move.`
+      : `The accounts just explained what this means for them: ${event.type} ${JSON.stringify(event.data)}. There's no plan to approve. Give the bottom line: what this means for the user and whether they need to do anything now (usually nothing). Start with "Bottom line:". Don't ask them to reply YES.`
+    : `This just happened: ${event.type} ${JSON.stringify(event.data)}. Say in a few words what it means for your account, then give the user your option: one thing they could do from your side and what it would do for them, with one number (like \"Option: put $X toward the card; that saves $Y a month.\"). Keep it calm; it's one option among several.`;
 
 export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<DebateResult> {
   const { db, finance, proposals, userPhone } = deps;
@@ -209,7 +215,7 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
 
   if (coachPrep) {
     const { plan, ask, proposalId } = await coachPrep;
-    const line = await speak("coach", facts, situation("coach", event), {
+    const line = await speak("coach", facts, situation("coach", event, plan != null), {
       event, plan, ask: ask?.actionText ?? null, heard, model: deps.model, deadline: started + config.debate.plan_target_ms,
     });
     await queue("coach", line.text, proposalId);
@@ -222,6 +228,75 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
 }
 
 const ACCOUNT_CHARACTERS = new Set<CharacterId>(["checking", "savings", "card", "car_loan", "ira"]);
+
+/** The plan that's waiting, as the options roundtable needs it. */
+export interface Waiting {
+  actionText: string;
+  to: string;
+  plan: Plan;
+  windfall: boolean;
+}
+
+/** Accounts with something worth saying right now, most pressing first (for "what should I do" with no plan). */
+function accountsWithAStake(facts: FactsSnapshot): CharacterId[] {
+  const a = (id: string) => facts.accounts.find((x) => x.id === id);
+  const runway = facts.indicators.find((i) => i.id === "runway")?.value ?? 99;
+  return [
+    ...(facts.shortfall ? (["checking"] as CharacterId[]) : []),
+    ...((a("card")?.balance ?? 0) > 0 && (a("card")?.aprPercent ?? 0) > 8 ? (["card"] as CharacterId[]) : []),
+    ...((a("ira")?.unclaimedMatchThisYear ?? 0) > 0 ? (["ira"] as CharacterId[]) : []),
+    ...(runway < 1 ? (["savings"] as CharacterId[]) : []),
+  ];
+}
+
+/**
+ * "So what should I do?": a short roundtable. The Coach says who's weighing in, each account with a stake gives its
+ * option (up to 3, in turn, so they can build on each other), and the Coach closes with the bottom line, built in
+ * code so it's exact: the one move to make in the bank app, why, and the rest for later.
+ */
+export async function runOptions(
+  deps: Omit<DebateDeps, "clock">,
+  ask: { inboundId: number; text: string; waiting: Waiting | null },
+  now: Date,
+): Promise<{ speakers: CharacterId[] }> {
+  const { db, finance, userPhone } = deps;
+  const started = Date.now();
+  const facts = await finance.facts();
+  const maxAccounts: number = config.moderator.max_accounts_per_event ?? 3;
+  const plan = ask.waiting?.plan ?? null;
+  const fromPlan = plan
+    ? [ask.waiting!.to, ...plan.lines.map((l) => String(l.destination))].filter((d): d is CharacterId => ACCOUNT_CHARACTERS.has(d as CharacterId))
+    : [];
+  const accounts = [...new Set([...fromPlan, ...accountsWithAStake(facts)])].slice(0, maxAccounts) as CharacterId[];
+  if (!accounts.length) accounts.push("checking", "savings");
+
+  const queue = (speaker: CharacterId, text: string, replyToOutbox: number | null = null, key: string = speaker) =>
+    queueOutbox(db, {
+      idempotency_key: `inbound:${ask.inboundId}:${key}`, user_phone: userPhone, speaker, text, reply_to: ask.inboundId,
+      reply_to_outbox: replyToOutbox, thread_key: `inbound:${ask.inboundId}`, priority: 1, created_sim_at: now.toISOString(),
+    });
+  const names = accounts.map((id) => character(id).name);
+  const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  await queue("coach", `Good question. ${who} each give an option, then my bottom line.`, null, "coach-open");
+
+  const planNote = (id: CharacterId) => {
+    const line = plan?.lines.find((l) => l.destination === id && l.amount > 0);
+    if (!line) return "";
+    const saved = Number((line.reasonNumbers as Record<string, unknown>).monthlyInterestSaved);
+    return id === "checking" && ask.waiting?.windfall
+      ? ` The plan keeps ${usd(line.amount)} in Checking so the balance doesn't go short before payday.`
+      : ` The plan sends ${usd(line.amount)} to ${character(id).name}${saved > 0 ? `, which saves ${usd(saved)} a month in interest` : ""}.`;
+  };
+  await speakInTurn(accounts, started,
+    (id, heard, deadline) =>
+      speak(id, facts, `The user asked: "${ask.text}".${planNote(id)} Give the user your option: one thing they could do from your side and what it would do for them, with one number (like "Option: put $X toward the card; that saves $Y a month."). Keep it calm; it's one option among several.`, {
+        model: deps.model, deadline, heard, extraSources: plan ? [plan] : [],
+      }),
+    (id, text, replyToOutbox) => queue(id, text, replyToOutbox));
+
+  await queue("coach", bottomLine(facts, ask.waiting));
+  return { speakers: [...accounts, "coach"] };
+}
 
 /**
  * "I got a $600 bonus, what should I do?" by text: the same group debate an event gets, as a reply.
@@ -265,10 +340,12 @@ export async function runWindfall(
     ...moves.map((m) => `move ${usd(m.amount)} to ${ACCOUNT_LABEL[String(m.destination)] ?? String(m.destination)}`),
   ].join(", and ");
 
-  // Speakers: where the money goes, plus Checking if some of it stays there to cover a gap, else one rival.
-  const rivals = (["savings", "card", "ira", "car_loan"] as CharacterId[]).filter((c) => c !== mainTo);
-  const accounts = (mainTo ? [mainTo, ...(keep > 0 ? (["checking"] as CharacterId[]) : rivals)] : (["checking", "savings"] as CharacterId[]))
-    .slice(0, config.moderator.max_speakers_per_event - 1);
+  // Speakers (up to 3, each giving its option): where the money goes, the plan's other parts, Checking if some of it
+  // stays there to cover a gap, then other accounts with a stake, so the user sees every real option.
+  const maxAccounts: number = config.moderator.max_accounts_per_event ?? 3;
+  const inPlan = moves.map((l) => String(l.destination) as CharacterId).filter((d) => ACCOUNT_CHARACTERS.has(d));
+  const order = [...inPlan, ...(keep > 0 ? (["checking"] as CharacterId[]) : []), ...(["savings", "card", "ira", "car_loan"] as CharacterId[])];
+  const accounts = [...new Set(order.length ? order : (["checking", "savings"] as CharacterId[]))].slice(0, maxAccounts);
 
   let proposalId: number | null = null;
   if (plan && proposal) {
@@ -301,7 +378,7 @@ export async function runWindfall(
   };
   const heard = await speakInTurn(accounts, started,
     (id, heardSoFar, deadline) =>
-      speak(id, facts, `The user texted: "${ask.text}". ${money}${planNote(id)} Explain what this money would mean on your side, with one number.`, {
+      speak(id, facts, `The user texted: "${ask.text}". ${money}${planNote(id)} Give the user your option: one thing they could do from your side and what it would do for them, with one number (like \"Option: put $X toward the card; that saves $Y a month.\"). Keep it calm; it's one option among several.`, {
         event, model: deps.model, deadline, extraSources, heard: heardSoFar,
       }),
     (id, text, replyToOutbox) => queue(id, text, null, replyToOutbox));
@@ -309,12 +386,12 @@ export async function runWindfall(
   // 3. The Coach closes with the plan and the YES.
   let line: { text: string };
   if (proposalId != null)
-    line = await speak("coach", facts, `The accounts just explained their side of the user's ${usd(ask.amount)}. ${money}${describePriorities(prefs) ? ` The user told us their priorities: ${describePriorities(prefs)}; the YES below follows them, so say so in a few words.` : ""} The plan: ${split}. Explain that split in plain words, naming each part with its own amount exactly as written here (no other amounts, no "remaining"), and why, then give the YES line.`, {
+    line = await speak("coach", facts, `The accounts each gave an option for the user's ${usd(ask.amount)}. ${money}${describePriorities(prefs) ? ` The user told us their priorities: ${describePriorities(prefs)}; the YES below follows them, so say so in a few words.` : ""} The plan: ${split}. Explain that split in plain words, naming each part with its own amount exactly as written here (no other amounts, no "remaining"), and why, then give the YES line.`, {
       event, plan: coachPlan, ask: proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
     });
   else if (plan && !main && keep > 0)
     // Everything stays in Checking: nothing to move, so nothing to say YES to.
-    line = { text: `Keep the whole ${usd(ask.amount)} in Checking for now${facts.shortfall ? `: you'd be short ${usd(facts.shortfall.amount)} before payday, and this covers it` : ""}. Nothing to move, so no YES needed.` };
+    line = { text: `Keep the whole ${usd(ask.amount)} in Checking for now${facts.shortfall ? `: you'd be short ${usd(facts.shortfall.amount)} before payday, and this covers it` : ""}. Nothing to move.` };
   else
     // No new proposal could be made: never invite a YES here, it could approve something else.
     line = { text: `Good problem to have. I couldn't build a plan for the ${usd(ask.amount)} right now. Text me again in a minute and the crew will weigh in.` };

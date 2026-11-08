@@ -14,6 +14,7 @@ import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { TOOL_AUTH_HEADER } from "../../contracts/src";
+import { config } from "./character";
 import { runEvent } from "./debate";
 import { runFollowUps } from "./followups";
 import { lyingModel, SIM_PHONE as PHONE, simEvent as ev, ungroundedIn, world as makeWorld, type World } from "./simworld";
@@ -75,7 +76,8 @@ check(`${runs} scripted runs, 0 ungrounded numbers`, totalBad === 0, `${totalMes
   const decisions: string[] = [];
   for (let i = 0; i < 5; i++) decisions.push((await runEvent(w.deps, ev(`cap${i}`, "big_purchase", { accountId: "card", data: { merchant: "Target", amount: 142.37 } }))).decision);
   const proactive = (await w.outbox()).filter((m) => m.priority === 0).length;
-  check("daily cap: proactive messages stop at the cap, the rest go to the digest", proactive <= 6 && decisions.includes("digest"), `${proactive} proactive sent; ${decisions.join(",")}`);
+  const cap: number = config.moderator.daily_cap_proactive;
+  check("daily cap: proactive messages stop at the cap, the rest go to the digest", proactive <= cap && decisions.includes("digest"), `${proactive} of ${cap} proactive sent; ${decisions.join(",")}`);
 }
 {
   const w = await world("shortfall", "2026-12-03T05:00:00.000Z");

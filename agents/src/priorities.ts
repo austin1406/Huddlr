@@ -18,15 +18,15 @@ export interface Priorities {
   protect: Pot[];
 }
 
-export const NAMES: Record<Pot, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+export const NAMES: Record<Pot, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Loan", ira: "IRA" };
 
-const ACCT = String.raw`(checking|savings?|emergency fund|cushion|credit cards?|cards?|debt|car loan|auto loan|car|ira|roth|retirement|401\s?k)`;
+const ACCT = String.raw`(checking|savings?|emergency fund|cushion|credit cards?|cards?|debt|car loan|auto loan|student loans?|mortgage|loans?|car|ira|roth|retirement|401\s?k)`;
 const toPot = (s: string): Pot | null => {
   const t = s.toLowerCase().replace(/\s+/g, " ");
   if (t === "checking") return "checking";
   if (/^(savings?|emergency fund|cushion)$/.test(t)) return "savings";
   if (/^(credit cards?|cards?|debt)$/.test(t)) return "card";
-  if (/^(car loan|auto loan|car)$/.test(t)) return "car_loan";
+  if (/^(car loan|auto loan|student loans?|mortgage|loans?|car)$/.test(t)) return "car_loan";
   if (/^(ira|roth|retirement|401 ?k)$/.test(t)) return "ira";
   return null;
 };

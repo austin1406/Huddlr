@@ -87,11 +87,11 @@ test("text YES accepts and the Coach confirms once; a second YES sends nothing",
   assert.equal(sent[0].priority, 1);
 });
 
-test("unclear short reply asks for a clear YES and does not accept", async () => {
+test("an unclear short reply is answered as conversation and never accepts", async () => {
   const { text, outbox, createProposal, call } = await setup();
   await createProposal();
-  assert.equal((await text("maybe?")).kind, "clarify");
-  assert.match((await outbox())[0].text, /clear YES/);
+  assert.equal((await text("maybe?")).kind, "chat", "answered, not held up waiting for a YES");
+  assert.equal((await outbox()).length, 0, "no 'only a clear YES' nudge");
   const still = (await (await call("GET", "/proposals/pending")).json()) as { proposal: ProposalSummary | null };
   assert.equal(still.proposal?.status, "pending");
 });
@@ -101,7 +101,7 @@ test("with a plan waiting, an @-mention or a short question still reaches the ch
   await createProposal();
   for (const t of ["@savings how am i doing", "@Savings", "​@Savings hi", "how's my card?", "what about IRA", "why?", "can I do half"])
     assert.equal((await text(t)).kind, "chat", t);
-  for (const t of ["maybe", "ok wait", "yes but only $50", "hmm?"]) assert.equal((await text(t)).kind, "clarify", t);
+  for (const t of ["maybe", "ok wait", "yes but only $50", "hmm?"]) assert.equal((await text(t)).kind, "chat", t);
   const still = (await (await call("GET", "/proposals/pending")).json()) as { proposal: ProposalSummary | null };
   assert.equal(still.proposal?.status, "pending", "nothing above approved the plan");
 });

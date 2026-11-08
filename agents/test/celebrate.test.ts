@@ -60,7 +60,7 @@ test("celebrations respect quiet hours and the daily cap; demo mode lifts both",
   const tz = "America/Chicago";
   assert.equal(celebrationTiming({ now: night, timezone: tz, demoMode: false, proactiveSentToday: 0 }), "digest");
   assert.equal(celebrationTiming({ now: night, timezone: tz, demoMode: true, proactiveSentToday: 0 }), "react");
-  assert.equal(celebrationTiming({ now: day, timezone: tz, demoMode: false, proactiveSentToday: 6 }), "digest");
+  assert.equal(celebrationTiming({ now: day, timezone: tz, demoMode: false, proactiveSentToday: 8 }), "digest");
   assert.equal(celebrationTiming({ now: day, timezone: tz, demoMode: false, proactiveSentToday: 2 }), "react");
 });
 

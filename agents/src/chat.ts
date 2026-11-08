@@ -1,11 +1,13 @@
 // A text that isn't an answer to a proposal: remember any goal or preference in it, then let the right
 // character answer (one speaker, grounded like everything else).
 import type { CharacterId, FactsSnapshot, Plan, ProposalService } from "../../contracts/src";
-import { proposalFromPlan } from "./debate";
+import { proposalFromPlan, type Waiting } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
 import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
-import { explainTemplate, lowestBreakdown, speak } from "./character";
+import { bottomLine } from "./bottomline";
+import { isBottomLineQuestion } from "./replies";
+import { doLine, explainTemplate, lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
@@ -18,7 +20,8 @@ const MENTION_ALIASES: Record<string, CharacterId> = {
   checking: "checking", check: "checking", bank: "checking",
   savings: "savings", saving: "savings", piggy: "savings",
   card: "card", credit: "card", creditcard: "card",
-  carloan: "car_loan", car_loan: "car_loan", car: "car_loan", loan: "car_loan",
+  carloan: "car_loan", car_loan: "car_loan", car: "car_loan", loan: "car_loan", loans: "car_loan", autoloan: "car_loan",
+  studentloan: "car_loan", student: "car_loan", mortgage: "car_loan", debtloan: "car_loan",
   ira: "ira", retirement: "ira",
   coach: "coach",
 };
@@ -58,7 +61,7 @@ export function isFollowUp(text: string): boolean {
   return /\b(why|what about|where (do|should|does|did) i|where'?d|so where|which one|confus\w*|explain|instead|huh|wait|what does (that|this) mean|i don'?t get|how (did|come|is that|so)|i thought|that'?s (not|wrong)|doesn'?t (add up|make sense)|what do you mean|wdym|(come|get|got) (that|it|\$?[\d,.]+) from|from where)\b|\?\?/i.test(text);
 }
 
-const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Loan", ira: "IRA" };
 
 /** The pending proposal, with its plan spelled out in words (built from the plan's own numbers). */
 async function pendingPlan(db: Queryable, phone: string) {
@@ -81,7 +84,7 @@ async function pendingPlan(db: Queryable, phone: string) {
   // For the Coach's "who is right" rule (it follows the first line): lead with the line the YES moves.
   const yesLine = plan.lines.find((l) => l.destination === row.to_account && l.amount > 0) ?? null;
   const coachPlan = leadWith(plan, yesLine);
-  return { actionText: row.action_text, source: row.source_event_id, plan, coachPlan, planAmount: plan.amount, split };
+  return { actionText: row.action_text, to: row.to_account, source: row.source_event_id, plan, coachPlan, planAmount: plan.amount, split };
 }
 
 /** The last few texts both ways (not counting this one), as "you: …" / "Savings: …" lines, plus every number in them. */
@@ -111,7 +114,7 @@ export function explainer(text: string): CharacterId | null {
   if (/\b(employer match|match|ira|retirement|401k)\b/.test(t)) return "ira";
   if (/\b(cushion|runway|emergency fund|essentials|must-pay|savings)\b/.test(t)) return "savings";
   if (/\b(shortfall|buffer|safe to spend|payday|lowest|checking|negative)\b/.test(t)) return "checking";
-  if (/\b(car loan|car payment|loan)\b/.test(t)) return "car_loan";
+  if (/\b(car loan|car payment|loans?|principal|payoff|pay off|amortiz\w*|mortgage|student loans?)\b/.test(t)) return "car_loan";
   if (/\b(plan|yes|proposal)\b/.test(t)) return "coach";
   return null;
 }
@@ -125,14 +128,15 @@ const GLOSSARY = [
   `Employer match: your job adds money to your IRA when you put money in; any match you don't claim is free money left behind.`,
   `Shortfall: Checking would dip below zero before your next paycheck.`,
   `Safe to spend: what you can spend before payday and still keep your buffer.`,
-  `Must-pay bills: rent, utilities, phone, the car payment and the card minimum.`,
+  `Must-pay bills: rent, utilities, phone, the loan payment and the card minimum.`,
+  `Principal: the part of the loan you still owe. Each payment covers that month's interest first; the rest lowers the principal.`,
 ].join(" ");
 
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
 export function pickResponder(text: string): CharacterId {
   const t = text.toLowerCase();
   if (/\b(credit|card|apr|interest|utiliz)/.test(t)) return "card";
-  if (/\b(car|loan|auto)\b/.test(t)) return "car_loan";
+  if (/\b(car|loans?|auto|mortgage|student loans?|principal|payoff)\b/.test(t)) return "car_loan";
   if (/\b(ira|retire|retirement|401k|match)\b/.test(t)) return "ira";
   if (/\b(saving|savings|emergency fund|cushion|runway)\b/.test(t)) return "savings";
   if (/\b(checking|balance|afford|spend|rent|bill|paycheck|payday)\b/.test(t)) return "checking";
@@ -144,6 +148,8 @@ export async function handleChat(
     db: Queryable; facts: () => Promise<FactsSnapshot>; userPhone: string; model?: (p: string) => Promise<string>; finance?: Finance;
     /** Re-points a waiting plan when the user states priorities. Without it, priorities are saved and confirmed only. */
     proposals?: ProposalService;
+    /** "What should I do?" roundtable (debate.ts runOptions): every account's option, then the Coach's bottom line. */
+    options?: (ask: { inboundId: number; text: string; waiting: Waiting | null }, now: Date) => Promise<{ speakers: CharacterId[] }>;
     /** Runs the group debate for a windfall (debate.ts runWindfall). Without it, the question gets one answer. */
     windfall?: (ask: { inboundId: number; text: string; amount: number; label: string }, now: Date) => Promise<{ speakers: CharacterId[] }>;
   },
@@ -168,6 +174,19 @@ export async function handleChat(
 
   const pending = await pendingPlan(deps.db, deps.userPhone);
 
+  // "So what should I do?": each account with a stake gives its option, then the Coach's bottom line (built in code:
+  // the move, why, and the rest for later). Without the roundtable wired in, just the Coach's bottom line.
+  // ("I got a $600 bonus, what should I do?" is a new question about new money: that's the bonus debate below.)
+  if (isBottomLineQuestion(text) && !parseWindfall(text) && (!parseMention(text) || parseMention(text)!.who === "coach")) {
+    const waiting = pending ? { actionText: pending.actionText, to: pending.to, plan: pending.plan, windfall: pending.source?.startsWith("chat_windfall_") ?? false } : null;
+    if (deps.options) {
+      const r = await deps.options({ inboundId: inbound.id, text, waiting }, now);
+      return { learned: 0, responder: "coach", debate: r.speakers };
+    }
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:bottomline`, speaker: "coach", text: bottomLine(await deps.facts(), waiting) });
+    return { learned: 0, responder: "coach" };
+  }
+
   // "Give me a summary of my account": every account in one message, built in code. No YES invite beyond
   // naming the plan that's already waiting.
   if (isSummaryQuestion(text) && (!parseMention(text) || parseMention(text)!.who === "coach")) {
@@ -191,11 +210,11 @@ export async function handleChat(
       if (next && next.actionText !== pending.actionText) {
         const created = await deps.proposals.create({ userPhone: deps.userPhone, plan: pending.plan, ...next, sourceEventId: pending.source });
         if (created.proposal) await scheduleProposalFollowUps(deps.db, { userPhone: deps.userPhone, proposalId: Number(created.proposal.id), now, emergency: false });
-        reply += ` I've updated the plan. Reply YES to: ${next.actionText}.`;
+        reply += ` I've updated the plan: ${doLine(next.actionText)}`;
       } else if (missing) {
-        reply += ` The plan that's waiting doesn't put anything in ${NAMES[top]}; it goes first next time there's money to place. Still waiting on your YES: ${pending.actionText}.`;
+        reply += ` The plan that's waiting doesn't put anything in ${NAMES[top]}; it goes first next time there's money to place. Still to do: ${doLine(pending.actionText)}`;
       } else {
-        reply += ` Your plan already starts there. Reply YES to: ${pending.actionText}.`;
+        reply += ` Your plan already starts there: ${doLine(pending.actionText)}`;
       }
     }
     await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:priorities`, speaker: "coach", text: reply });
@@ -255,7 +274,7 @@ export async function handleChat(
   const context = [
     ...(recent.lines.length ? [`RECENT CONVERSATION (oldest first):`, ...recent.lines] : []),
     ...(followUp ? [`ALL BALANCES: ${balances}.`] : []),
-    ...(pending ? [`THE PLAN WAITING FOR THEIR YES: "${pending.actionText}". The full plan: ${pending.split}.`] : []),
+    ...(pending ? [`THE PLAN (the user makes the move themselves in their bank app; you never ask for a YES): "${doLine(pending.actionText)}" The full plan: ${pending.split}.`] : []),
     ...(recent.lines.length || pending
       ? [`Answer their latest text as part of this conversation, not from scratch. If they're confused about the plan, explain plainly what it does and why, with its numbers. Never contradict the waiting plan or invent a different one.`]
       : []),

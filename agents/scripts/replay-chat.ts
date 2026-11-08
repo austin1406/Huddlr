@@ -6,7 +6,7 @@ import { StubState } from "../../finance/src/state";
 import { handleChat } from "../src/chat";
 import { cast } from "../src/character";
 import { migrate } from "../src/db";
-import { runWindfall } from "../src/debate";
+import { runOptions, runWindfall } from "../src/debate";
 import { financeClient } from "../src/finance";
 import { makeProposalService } from "../src/proposals";
 
@@ -30,7 +30,9 @@ for (const [i, text] of texts.entries()) {
   await db.query("INSERT INTO memory_messages (user_phone, channel, direction, speaker, text, inbound_id, created_sim_at) VALUES ($1, 'text', 'in', 'user', $2, $3, $4)", [PHONE, text, id, now]);
   const t = Date.now();
   await handleChat(
-    { db, facts: () => finance.facts(), userPhone: PHONE, finance, windfall: (ask, at) => runWindfall({ db, finance, proposals, userPhone: PHONE }, ask, at) },
+    { db, facts: () => finance.facts(), userPhone: PHONE, finance, proposals,
+      windfall: (ask, at) => runWindfall({ db, finance, proposals, userPhone: PHONE }, ask, at),
+      options: (ask, at) => runOptions({ db, finance, proposals, userPhone: PHONE }, ask, at) },
     { id, text },
     now,
   );

@@ -69,10 +69,10 @@ test("spots windfall questions with one amount", () => {
 test("'$600 bonus, what should I do?' -> two accounts debate, the Coach closes with a plan to say YES to", async () => {
   const { chat, outbox, proposals, finance, facts, db } = await setup();
   const r = await chat("I got a $600 bonus, what should I do?");
-  assert.equal(r.debate?.length, 3, `speakers: ${r.debate}`);
+  assert.equal(r.debate?.length, 4, `speakers: ${r.debate}`);
 
   const sent = await outbox();
-  assert.equal(sent.length, 4, "Coach opener, two accounts, Coach plan");
+  assert.equal(sent.length, 5, "Coach opener, three accounts with their options, Coach bottom line");
   assert.equal(sent[0].speaker, "coach", "the Coach answers the question first");
   assert.match(sent[0].text, new RegExp(`^Good question\\. ${r.debate![0].replace("car_loan", "Car Loan")}`, "i"));
   assert.match(sent[0].text, /weigh in, then my plan\.$/);
@@ -84,7 +84,7 @@ test("'$600 bonus, what should I do?' -> two accounts debate, the Coach closes w
   const plan = await finance.plan(600);
   const ask = proposalFromPlan(plan)!;
   assert.ok(sent.slice(1, 3).some((m) => m.speaker === String(plan.lines[0].destination)), `plan favors ${plan.lines[0].destination}`);
-  assert.match(sent.at(-1)!.text, new RegExp(`Reply YES to: ${ask.actionText.replace(/\$/g, "\\$").replace(/\./g, "\\.")}`));
+  assert.match(sent.at(-1)!.text, new RegExp(`${ask.actionText.replace(/\$/g, "\\$").replace(/\./g, "\\.")} in your bank app`));
 
   const pending = await proposals.getPending(PHONE);
   assert.equal(pending?.amount, ask.amount);
@@ -110,7 +110,7 @@ test("a second windfall replaces the waiting plan, so YES approves what the late
   assert.notEqual(second?.id, first?.id);
   assert.equal(second?.amount, 200);
   assert.equal(last.proposal_id, Number(second!.id));
-  assert.match(last.text, new RegExp(`Reply YES to: ${second!.actionText.replace(/\$/g, "\\$").replace(/\./g, "\\.")}`));
+  assert.match(last.text, new RegExp(`${second!.actionText.replace(/\$/g, "\\$").replace(/\./g, "\\.")} in your bank app`));
   assert.equal((await proposals.get(Number(first!.id)))?.status, "expired", "the old plan can no longer be approved");
 });
 
@@ -131,13 +131,13 @@ test("bare amounts count when a windfall word makes it clear", () => {
 test("bonus while short: keep part in Checking, the YES moves the rest OUT of Checking (never 'from Savings')", async () => {
   const { chat, outbox, proposals } = await setup("shortfall");
   const r = await chat("I got a $600 bonus. What should I do with it?");
-  assert.deepEqual(r.debate, ["card", "checking", "coach"], "where the money goes, plus Checking (it keeps some)");
+  assert.deepEqual(r.debate, ["card", "checking", "savings", "coach"], "where the money goes, Checking (it keeps some), and Savings' option");
 
   const pending = await proposals.getPending(PHONE);
   assert.equal(pending?.actionText, "Move $457.00 from Checking to Card");
   assert.equal(pending?.from, "checking");
   const coach = (await outbox()).at(-1)!;
-  assert.match(coach.text, /Reply YES to: Move \$457\.00 from Checking to Card/);
+  assert.match(coach.text, /Move \$457\.00 from Checking to Card in your bank app/);
   for (const m of await outbox()) assert.doesNotMatch(m.text, /from Savings/);
 });
 
@@ -154,7 +154,7 @@ test("a confused follow-up goes to the Coach, with the conversation and the wait
   const p = prompts.at(-1)!;
   assert.match(p, /RECENT CONVERSATION/);
   assert.match(p, /you: I got a \$600 bonus/);
-  assert.match(p, /THE PLAN WAITING FOR THEIR YES: "Move \$457\.00 from Checking to Card"/);
+  assert.match(p, /THE PLAN \(the user makes the move themselves in their bank app; you never ask for a YES\): "Move \$457\.00 from Checking to Card in your bank app\."/);
   assert.match(p, /keep \$143\.00 in Checking/);
 
   // Asking about the same bonus again explains the waiting plan; it doesn't start a second debate.

@@ -1,6 +1,7 @@
 // One character turn: prompt -> Gemini -> number checker -> (retry once if time allows) -> template fallback.
 import { readFileSync } from "node:fs";
 import type { Account, CharacterId, FactsSnapshot, FinanceEvent, IndicatorId, Plan } from "../../contracts/src";
+import { bottomLine } from "./bottomline";
 import { checkMessage } from "./checker";
 import { geminiQuota, parseQuotaError, QuotaError } from "./quota";
 
@@ -53,6 +54,46 @@ export function lowestBreakdown(facts: FactsSnapshot) {
   };
 }
 
+/** Months to pay off `balance` at monthly rate `r` with payment `pay` (standard amortization). Null if it never ends. */
+function monthsToPayOff(balance: number, r: number, pay: number): number | null {
+  if (pay <= 0) return null;
+  if (r === 0) return balance / pay;
+  if (pay <= balance * r) return null;
+  return -Math.log(1 - (r * balance) / pay) / Math.log(1 + r);
+}
+
+/**
+ * Any loan, broken down (computed in code so the Loan character can say every number): what's owed, the rate, how
+ * this month's payment splits between interest and principal, when it's paid off at this pace, the interest still
+ * to pay, and what an extra $100 a month would change. Standard amortization from the APR and payment; P1's engine
+ * doesn't accrue loan interest yet, so these are estimates ("about").
+ */
+export function loanBreakdown(facts: FactsSnapshot, extraPerMonth = 100) {
+  const l = account(facts, "car_loan");
+  if (!l || !(l.balance > 0) || !l.monthlyPayment) return null;
+  const apr = l.aprPercent ?? 0;
+  const r = apr / 100 / 12;
+  const interestThisMonth = round2(l.balance * r);
+  const principalThisMonth = round2(Math.max(0, l.monthlyPayment - interestThisMonth));
+  const n = monthsToPayOff(l.balance, r, l.monthlyPayment);
+  if (n == null) return null;
+  const monthsLeft = Math.ceil(n - 1e-9);
+  const payoff = new Date(`${facts.localDate}T12:00:00Z`);
+  payoff.setUTCMonth(payoff.getUTCMonth() + monthsLeft);
+  const totalInterestLeft = round2(Math.max(0, n * l.monthlyPayment - l.balance));
+  const nExtra = monthsToPayOff(l.balance, r, l.monthlyPayment + extraPerMonth)!;
+  const monthsSooner = Math.max(0, monthsLeft - Math.ceil(nExtra - 1e-9));
+  const interestSaved = round2(Math.max(0, totalInterestLeft - (nExtra * (l.monthlyPayment + extraPerMonth) - l.balance)));
+  return {
+    label: l.name, owed: l.balance, aprPercent: apr, monthlyPayment: l.monthlyPayment,
+    interestThisMonth, principalThisMonth, monthsLeft,
+    yearsLeft: Math.round((monthsLeft / 12) * 10) / 10,
+    payoffMonth: payoff.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+    payoffYear: payoff.getUTCFullYear(),
+    totalInterestLeft, extraPerMonth, monthsSooner, interestSaved,
+  };
+}
+
 /** What the card balance costs in interest each month (balance x APR / 12), computed in code so Card can say it. */
 export function cardMonthlyInterest(facts: FactsSnapshot): number | null {
   const c = account(facts, "card");
@@ -102,7 +143,7 @@ export function factsFor(id: CharacterId, facts: FactsSnapshot, event?: FinanceE
     },
     savings: { account: account(facts, "savings"), runway: indicator(facts, "runway"), savingsRate: indicator(facts, "savings_rate"), cushion: cushionWords(facts) },
     card: { account: account(facts, "card"), utilization: indicator(facts, "credit_utilization"), monthlyInterest: cardMonthlyInterest(facts) },
-    car_loan: { account: account(facts, "car_loan"), billReliability: indicator(facts, "bill_reliability") },
+    car_loan: { account: account(facts, "car_loan"), billReliability: indicator(facts, "bill_reliability"), breakdown: loanBreakdown(facts) },
     ira: { account: account(facts, "ira"), retirementOnTrack: indicator(facts, "retirement_on_track") },
     coach: { ...facts, cushion: cushionWords(facts) },
   };
@@ -157,7 +198,16 @@ export function keyNumbers(id: CharacterId, facts: FactsSnapshot, event?: Financ
     }
     case "car_loan": {
       const l = a("car_loan")!;
-      out.push(`monthly payment: ${fmtUsd(l.monthlyPayment ?? 0)}`, `still owed: ${fmtUsd(l.balance)}`);
+      out.push(`still owed: ${fmtUsd(l.balance)}`, `monthly payment: ${fmtUsd(l.monthlyPayment ?? 0)}`);
+      const b = loanBreakdown(facts);
+      if (b)
+        out.push(
+          `interest rate (APR): ${b.aprPercent}%`,
+          `this month's payment splits into about ${fmtUsd(b.interestThisMonth)} interest and ${fmtUsd(b.principalThisMonth)} toward what you owe`,
+          `paid off in about ${b.monthsLeft} months (${b.payoffMonth}) at this pace, with about ${fmtUsd(b.totalInterestLeft)} of interest still to pay`,
+          `paying an extra ${fmtUsd(b.extraPerMonth)} a month would finish about ${b.monthsSooner} months sooner and save about ${fmtUsd(b.interestSaved)} in interest`,
+          `say "your loan", not "your car loan"`,
+        );
       break;
     }
     case "ira": {
@@ -192,7 +242,7 @@ export function buildPrompt(
     `How to write:`,
     `- Talk TO the user as "you". Never use their name or call them "the user".`,
     isCoach
-      ? `- At most 3 short sentences: the plan in plain words (where each part of the money goes and why), then the action.`
+      ? `- Start with "Bottom line:" and the one thing to do now, in plain words, and why (one sentence). If the plan has more parts, mention them in one short sentence as extras for later. At most 3 short sentences.`
       : `- One message, at most 2 short sentences: the one number that matters most right now, from KEY NUMBERS, and what it means for the user in plain words (like "that costs you $X a month in interest").`,
     ...(isCoach ? [] : [`- Explain, don't persuade. Never ask for the money yourself ("put it in me", "send it to me", "pay me first"); say what it would do for the user.`]),
     ...(!isCoach && heard?.length
@@ -220,7 +270,9 @@ export function buildPrompt(
                   : [`The plan sends money to ${winner} (${why}), but ${winner} hasn't spoken. Don't say anyone "is right"; just give the reason in plain words.`];
               })()
             : []),
-          `End with exactly: "Reply YES to: ${ask ?? "this plan"}."`,
+          ask
+            ? `End with exactly: "${doLine(ask)}" (the user makes the move themselves; you can't move money, so never ask them to reply YES).`
+            : `End by naming the first move to make in their bank app. Never ask them to reply YES.`,
         ]
       : []),
     ``,
@@ -233,7 +285,7 @@ export function buildPrompt(
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** Grounded fallback built only from facts, so it always passes the checker. */
-const DEST: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+const DEST: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Loan", ira: "IRA" };
 const destName = (d: string) => DEST[d] ?? d.replace(/^goal:/, "your ").replace(/_/g, " ") + (d.startsWith("goal:") ? " goal" : "");
 
 const REASON: Record<string, string> = {
@@ -246,11 +298,23 @@ const REASON: Record<string, string> = {
   extra_debt_payment: "to pay down debt",
 };
 
-/** Coach's grounded plan message. `ask` is the proposal's action text, the one thing a YES approves. */
+/**
+ * The one move the user makes, as the Coach says it: "Move $150.00 from Checking to IRA in your bank app."
+ * The Coach can't move money, so it never asks for a YES; the plan is checked off when P1 sees the transfer.
+ */
+export const doLine = (ask: string) => `${ask} in your bank app.`;
+
+/** Coach's grounded plan message. `ask` is the proposal's action text: the one move the user makes. */
 export function planTemplate(plan: Plan, ask?: string | null): string {
-  const lines = plan.lines.map((l) => `${usd(l.amount)} to ${destName(l.destination)} ${REASON[l.reasonCode] ?? ""}`.trim());
-  const head = lines.length === 1 ? `Here's the call: ${lines[0]}.` : `Here's the plan: ${lines.join("; ")}.`;
-  return ask ? `${head} Reply YES to: ${ask}.` : `${head} Reply YES to approve, or tell me what to change.`;
+  const [first, ...rest] = plan.lines.filter((l) => l.amount > 0);
+  if (!first) return ask ? `Bottom line: ${doLine(ask)}` : `Bottom line: nothing to move right now.`;
+  const head = `Bottom line: ${usd(first.amount)} to ${destName(first.destination)} ${REASON[first.reasonCode] ?? ""}`.trim() + ".";
+  const keep = rest.filter((l) => l.destination === "checking" && l.reasonCode === "cover_shortfall");
+  const later = rest.filter((l) => !keep.includes(l));
+  const extra =
+    keep.map((l) => ` Keep ${usd(l.amount)} in Checking so you're not short before payday.`).join("") +
+    (later.length ? ` The plan also suggests ${later.map((l) => `${usd(l.amount)} to ${destName(l.destination)}`).join(" and ")} for later.` : "");
+  return ask ? `${head}${extra} ${doLine(ask)}` : `${head}${extra} Tell me if you'd like a different split.`;
 }
 
 export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | null, ask?: string | null): string {
@@ -267,14 +331,18 @@ export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | nu
         : `I'm at ${usd(a("checking").balance)}; safe to spend until payday is ${usd(facts.forecast.safeToSpendUntilPayday)}.`;
     case "savings":
       return cushionWords(facts)?.sentence ?? `Your savings is at ${usd(a("savings").balance)}.`;
-    case "car_loan":
-      return `The ${usd(a("car_loan").monthlyPayment ?? 0)} car payment comes out every month, with ${usd(a("car_loan").balance)} still owed.`;
+    case "car_loan": {
+      const b = loanBreakdown(facts);
+      return b
+        ? `Your loan has ${usd(b.owed)} left at ${b.aprPercent}%. Of this month's ${usd(b.monthlyPayment)} payment, about ${usd(b.interestThisMonth)} is interest and ${usd(b.principalThisMonth)} lowers what you owe; at this pace it's paid off around ${b.payoffMonth}.`
+        : `Your loan payment of ${usd(a("car_loan").monthlyPayment ?? 0)} comes out every month, with ${usd(a("car_loan").balance)} still owed.`;
+    }
     case "ira":
       return a("ira").unclaimedMatchThisYear
         ? `${usd(a("ira").unclaimedMatchThisYear!)} of employer match is still unclaimed this year. Contributing would capture that free money.`
         : `Your IRA is at ${usd(a("ira").balance)}.`;
     case "coach":
-      return `Here's where things stand. Ask me about any account, or @mention one of them, and I'll walk you through it.`;
+      return bottomLine(facts, null);
   }
 }
 
@@ -306,11 +374,12 @@ export function explainTemplate(id: CharacterId, facts: FactsSnapshot): string {
         : `Your IRA is money set aside for retirement. It's at ${usd(ira?.balance ?? 0)} right now.`;
     }
     case "car_loan": {
-      const l = a("car_loan");
-      return `Your car loan has ${usd(l?.balance ?? 0)} still owed, paid down ${usd(l?.monthlyPayment ?? 0)} each month. Extra payments shorten the loan and cut the interest.`;
+      const b = loanBreakdown(facts);
+      if (!b) return `Your loan payment comes out each month; extra payments shorten the loan and cut the interest.`;
+      return `Each ${usd(b.monthlyPayment)} payment pays that month's interest first (about ${usd(b.interestThisMonth)} now), and the rest, ${usd(b.principalThisMonth)}, lowers what you owe. At this pace your ${usd(b.owed)} is paid off around ${b.payoffMonth}. An extra ${usd(b.extraPerMonth)} a month would finish about ${b.monthsSooner} months sooner and save about ${usd(b.interestSaved)}.`;
     }
     case "coach":
-      return `Here's the short version: each account watches one part of your money, and I turn what they say into one plan you can approve with YES. Ask about any word and I'll break it down.`;
+      return `Here's the short version: each account watches one part of your money, and I turn what they say into one simple move you make in your bank app. Ask about any word and I'll break it down.`;
   }
 }
 
@@ -355,13 +424,21 @@ export function coachProblem(
   heard?: Array<{ name: string; text: string }>,
 ): string | null {
   if (id !== "coach") return null;
-  const crowned = [...text.matchAll(/\b(Checking|Savings|Card|Car Loan|IRA)\s+(?:is|was)\s+(?:also\s+)?right\b/gi)].map((m) => m[1].toLowerCase());
+  const crowned = [...text.matchAll(/\b(Checking|Savings|Card|Car Loan|Loan|IRA)\s+(?:is|was)\s+(?:also\s+)?right\b/gi)].map((m) => m[1].toLowerCase());
   if (!plan) {
     // No plan (a plain chat answer): only an account that just argued may be called "right".
     const spoke = (n: string) => heard?.some((h) => h.name.toLowerCase() === n) ?? false;
-    return crowned.some((n) => !spoke(n)) ? `Don't say any account "is right"; nobody argued. Just answer the question.` : null;
+    if (crowned.some((n) => !spoke(n))) return `Don't say any account "is right"; nobody argued. Just answer the question.`;
+    // Closing a debate with nothing to approve: a bottom line, and never a YES invite (it could approve something else).
+    if (heard?.length) {
+      if (/reply yes/i.test(text)) return `There's no plan to approve here; don't ask them to reply YES.`;
+      if (!/^\s*Bottom line:/i.test(text)) return `Start with "Bottom line:" and whether they need to do anything now.`;
+    }
+    return null;
   }
-  if (ask && !text.includes(`Reply YES to: ${ask}`)) return `It must end with exactly "Reply YES to: ${ask}."`;
+  if (/reply yes|say yes|text yes/i.test(text)) return `Don't ask them to reply YES; you can't move money. Tell them the move to make in their bank app.`;
+  if (ask && !text.toLowerCase().includes(doLine(ask).toLowerCase().replace(/\.$/, ""))) return `It must end with exactly "${doLine(ask)}"`;
+  if (!/^\s*Bottom line:/i.test(text)) return `Start with "Bottom line:" and the one thing to do now.`;
   const first = plan.lines[0];
   if (!first) return null;
   const winner = destName(String(first.destination));
@@ -381,6 +458,8 @@ export function styleProblem(id: CharacterId, text: string): string | null {
   if (/\b(nervous|anxious|worried|worry|scared|scary|panic\w*|freak\w*|be careful|stressed|terrif\w*)\b/i.test(text))
     return `Keep the tone calm and confident: no "nervous", "worried" or "be careful".`;
   if (/\b(lol|lmao|bro|dude|ngl|tbh|fr|gonna|wanna|gotta|yo|bruh|omg)\b/i.test(text)) return `No slang; keep it professional.`;
+  // A reply that hit the length limit mid-sentence ("…an extra $100.00 a month would") is never sent as is.
+  if (!/[.!?]["'”’)\]]?\s*$/.test(text.trim())) return `Your reply got cut off. Say it in fewer words and end with a full sentence.`;
   return null;
 }
 
