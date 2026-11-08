@@ -20,6 +20,8 @@ export const env = {
   projectId: () => required("PHOTON_PROJECT_ID"),
   webhookSecret: () => required("PHOTON_WEBHOOK_SECRET"),
   databaseUrl: process.env.DATABASE_URL ?? "",
+  /** Shared team secret; required on /photon/attachments (sent as x-huddlr-secret). */
+  secret: process.env.HUDDLR_SECRET ?? "",
   // Spike only: auto-reply to every inbound text. Keep OFF once agents are running.
   echo: process.env.PHOTON_ECHO === "1",
   // Set to 0 to stop the outbox sender (e.g. while debugging).

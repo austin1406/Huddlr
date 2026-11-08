@@ -27,3 +27,6 @@ Thumbs.db
 # Editors
 .idea/
 .vscode/
+
+# photon runtime data (event log, user photos): never commit
+photon/data/
