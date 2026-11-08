@@ -12,6 +12,14 @@ export class EventLog {
     for (const e of initial) this.add(e);
   }
 
+  has(id: string): boolean {
+    return this.ids.has(id);
+  }
+
+  get(id: string): FinanceEvent | undefined {
+    return this.events.find((e) => e.id === id);
+  }
+
   /** False when an event with this id already exists (duplicate protection). */
   add(event: FinanceEvent): boolean {
     if (this.ids.has(event.id)) return false;
@@ -54,7 +62,7 @@ export function detectEvents(state: LedgerState, persona: Persona, facts: FactsS
     } else if (t.kind === "transfer" && t.from && t.to) {
       out.push({
         id: makeEventId("user_transfer_seen", t.id), type: "user_transfer_seen", occurredAt: t.occurredAt, severity: "low", accountId: t.to,
-        data: { amount: t.amount, from: t.from, to: t.to, matchedProposalId: null },
+        data: { amount: t.amount, from: t.from, to: t.to, matchedProposalId: null, txnId: t.id },
       });
     }
   }

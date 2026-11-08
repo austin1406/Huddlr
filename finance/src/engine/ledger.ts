@@ -47,6 +47,11 @@ export interface LedgerState {
   onTimeBillStreak: number;
   peers: { name: string; owesUser: number }[];
   nextSeq: number;
+  /**
+   * The transfer watcher's results by transfer id: the proposal it completed, or null when none matched.
+   * A transfer with no entry has not been resolved yet (the agents service did not answer) and is retried.
+   */
+  completed?: Record<string, string | null>;
 }
 
 /** What the engine can be told to start from, for demos and tests. */
@@ -79,6 +84,7 @@ export function createLedger(persona: Persona, today: string, overrides: LedgerO
     onTimeBillStreak: persona.spending.onTimeBillStreak,
     peers: persona.peers.map((p) => ({ name: p.name, owesUser: p.owesUser })),
     nextSeq: 1,
+    completed: {},
   };
 }
 
