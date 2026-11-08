@@ -271,14 +271,15 @@ export function accountsInQuestion(text: string): CharacterId[] {
  */
 export async function runRoundtable(
   deps: Omit<DebateDeps, "clock">,
-  ask: { inboundId: number; text: string; context?: string; extraSources?: unknown[] },
+  ask: { inboundId: number; text: string; context?: string; extraSources?: unknown[]; accounts?: CharacterId[] },
   now: Date,
 ): Promise<{ speakers: CharacterId[] }> {
   const { db, finance, userPhone } = deps;
   const started = Date.now();
   const facts = await finance.facts();
   const maxAccounts: number = config.moderator.max_accounts_per_event ?? 3;
-  let accounts = [...new Set([...accountsInQuestion(ask.text), ...accountsWithAStake(facts)])].slice(0, maxAccounts) as CharacterId[];
+  // `accounts` lets the caller pick who matters most for this question (a house: Savings, Card, Loan).
+  let accounts = [...new Set([...(ask.accounts ?? []), ...accountsInQuestion(ask.text), ...accountsWithAStake(facts)])].slice(0, maxAccounts) as CharacterId[];
   if (!accounts.length) accounts = ["checking", "savings", "card"];
 
   const queue = (speaker: CharacterId, text: string, replyToOutbox: number | null = null, key: string = speaker) =>
