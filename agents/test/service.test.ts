@@ -96,6 +96,16 @@ test("unclear short reply asks for a clear YES and does not accept", async () =>
   assert.equal(still.proposal?.status, "pending");
 });
 
+test("with a plan waiting, an @-mention or a short question still reaches the characters (never approves)", async () => {
+  const { text, createProposal, call } = await setup();
+  await createProposal();
+  for (const t of ["@savings how am i doing", "@Savings", "​@Savings hi", "how's my card?", "what about IRA", "why?", "can I do half"])
+    assert.equal((await text(t)).kind, "chat", t);
+  for (const t of ["maybe", "ok wait", "yes but only $50", "hmm?"]) assert.equal((await text(t)).kind, "clarify", t);
+  const still = (await (await call("GET", "/proposals/pending")).json()) as { proposal: ProposalSummary | null };
+  assert.equal(still.proposal?.status, "pending", "nothing above approved the plan");
+});
+
 test("NO declines; a long unrelated message is left for the characters", async () => {
   const { text, createProposal } = await setup();
   await createProposal();
