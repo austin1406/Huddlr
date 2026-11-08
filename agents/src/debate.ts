@@ -259,7 +259,7 @@ export function accountsInQuestion(text: string): CharacterId[] {
   find(/\b(sav(e|ing|ings)|cushion|emergency fund|rainy day)\b/, "savings");
   find(/\b(ira|retire\w*|401k|match|invest\w*)\b/, "ira");
   find(/\b(loans?|car|mortgage|tuition|student|debt)\b/, "car_loan");
-  find(/\b(checking|spend|afford|bills?|rent|payday|paycheck|budget)\b/, "checking");
+  find(/\b(checking|spend|afford|bills?|rent|payday|paycheck|budget|purchase|buy|dinner|groceries|shopping|order)\b/, "checking");
   return [...new Set(hits.sort((a, b) => a[0] - b[0]).map(([, id]) => id))];
 }
 

@@ -84,3 +84,27 @@ test("@coach still gets one voice", async () => {
   assert.equal(r.debate, undefined);
   assert.deepEqual((await out()).map((x) => x.speaker), ["coach"]);
 });
+
+test("phone test: two things in one text get both answered, and thinking about a loan isn't saving one", async () => {
+  const { parseLoanReport } = await import("../src/loans");
+  assert.equal(parseLoanReport("i wanna purchase something for $20 and take a loan out"), null);
+  assert.equal(parseLoanReport("wait can i purchase a dinner tn and then take a loan out from the bank for a new house"), null);
+
+  const prompts: string[] = [];
+  const { db, chat, out } = await setup(async (p) => {
+    prompts.push(p);
+    if (p.startsWith("You are Coach")) return "Bottom line: the $20.00 purchase fits, and before a loan check the rate and monthly payment.";
+    if (p.startsWith("You are Loan")) return "Before a new loan, check the rate and the monthly payment against your $437.50 safe to spend.";
+    return "Yes, $20.00 fits; you have $437.50 safe to spend until payday.";
+  });
+  const r = await chat("i wanna purchase something for $20 and take a loan out");
+  assert.ok(r.debate?.includes("checking") && r.debate?.includes("car_loan"), `both parts answered: ${r.debate}`);
+  assert.equal(r.debate?.at(-1), "coach");
+  const coachPrompt = prompts.find((p) => p.startsWith("You are Coach"))!;
+  assert.match(coachPrompt, /CAN THEY AFFORD THE PURCHASE \(from the finance engine; Checking should say this\): Yes, \$20\.00 fits/);
+  assert.match(coachPrompt, /THEY'RE ALSO THINKING ABOUT A NEW LOAN/);
+  assert.match(coachPrompt, /each of you answers the part about your account/);
+  const saved = await db.query("SELECT 1 FROM memory_facts WHERE key LIKE 'loan:%'");
+  assert.equal(saved.rows.length, 0, "no 'other loan' saved");
+  assert.ok((await out()).every((m) => !/other loan/.test(m.text)));
+});

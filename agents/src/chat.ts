@@ -14,7 +14,7 @@ import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
 import type { Finance } from "./finance";
 import { queueOutbox } from "./outbox";
-import { maybeAnswerAfford } from "./photo";
+import { affordText, maybeAnswerAfford } from "./photo";
 import { isRecallQuestion, recallAnswer } from "./recall";
 
 const MENTION_ALIASES: Record<string, CharacterId> = {
@@ -178,8 +178,12 @@ export async function handleChat(
   if (!text) return { learned: 0, responder: null };
   const base = { user_phone: deps.userPhone, reply_to: inbound.id, thread_key: `inbound:${inbound.id}`, priority: 1 as const, created_sim_at: now.toISOString() };
 
+  // Several things in one text ("can I buy dinner tonight and then take a loan out for a house?"): the roundtable
+  // answers each part, so the single-topic shortcuts below don't take just one piece of it.
+  const multiTopic = !parseMention(text) && /\b(and|then|also|plus)\b/i.test(text) && accountsInQuestion(text).length >= 2;
+
   // "Can I afford $40?" (or a price after a photo) is answered by P1's can_i_afford, not by the model.
-  if (deps.finance && (await maybeAnswerAfford({ db: deps.db, finance: deps.finance, userPhone: deps.userPhone }, { id: inbound.id, text }, now)))
+  if (!multiTopic && deps.finance && (await maybeAnswerAfford({ db: deps.db, finance: deps.finance, userPhone: deps.userPhone }, { id: inbound.id, text }, now)))
     return { learned: 0, responder: "checking" };
 
   // "What did we decide?" is answered from the record (last call + latest plan), never from the model.
@@ -323,10 +327,27 @@ export async function handleChat(
   // the Coach's bottom line. (@-mentions, follow-ups, "explain…" and the Coach explaining a waiting plan stay one voice.)
   // A question naming two or more accounts ("card or savings first?") also gets the table, not just one of them.
   const general = responder === "coach" || accountsInQuestion(text).length >= 2;
-  if (general && !mention && !followUp && !explain && !explainingPlan && !thinkingAboutLoan && deps.roundtable) {
+  if (((general && !followUp && !explain && !explainingPlan && !thinkingAboutLoan) || multiTopic) && !mention && deps.roundtable) {
+    // Facts for each part, computed in code: a purchase with a price gets P1's can_i_afford verdict; a loan they're
+    // thinking about gets what to check before signing and what's safe to spend.
+    const parts: string[] = [];
+    const sources: unknown[] = [];
+    const price = extractNumbers(text).filter((n) => n.kind === "money");
+    if (deps.finance && price.length === 1 && price[0].value && /\b(purchase|buy|spend|afford|order|get|dinner|pay for)\b/i.test(text)) {
+      const verdict = await deps.finance.canIAfford(price[0].value).catch(() => null);
+      if (verdict) {
+        parts.push(`CAN THEY AFFORD THE PURCHASE (from the finance engine; Checking should say this): ${affordText(verdict)}`);
+        sources.push(verdict);
+      }
+    }
+    if (/\bloans?\b/i.test(text) && /\b(take|get|borrow|apply|need|want|wanna|thinking|planning|new)\b/i.test(text)) {
+      parts.push(`THEY'RE ALSO THINKING ABOUT A NEW LOAN: Loan should say what to check before signing (how much, the interest rate, the monthly payment, and whether it fits their budget) and offer to break it down. SAFE TO SPEND UNTIL PAYDAY: $${facts.forecast.safeToSpendUntilPayday.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`);
+      sources.push({ safeToSpendUntilPayday: facts.forecast.safeToSpendUntilPayday });
+    }
+    if (multiTopic) parts.push(`This text asks about more than one thing: each of you answers the part about your account, and the Coach's bottom line covers every part.`);
     const r = await deps.roundtable({
-      inboundId: inbound.id, text, context,
-      extraSources: [...goals.map((g) => g.value), extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : [])), recent.numbers, ...(pending ? [pending.plan] : [])],
+      inboundId: inbound.id, text, context: [context, ...parts].filter(Boolean).join("\n"),
+      extraSources: [...goals.map((g) => g.value), extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : [])), recent.numbers, ...(pending ? [pending.plan] : []), ...sources],
     }, now);
     return { learned: 0, responder: "coach", debate: r.speakers };
   }
