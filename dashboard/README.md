@@ -25,6 +25,15 @@ It's behind a login (user `huddlr`, password `DASHBOARD_PASSWORD` in `/opt/huddl
 
 Env (shared `/opt/huddlr/.env`): `DATABASE_URL`, `FINANCE_URL`, `HUDDLR_SECRET`, `DEMO_USER_PHONE`, `DASHBOARD_PASSWORD`, optional `DASHBOARD_PORT` (3001).
 
-## Next
+## Demo controls (top panel)
 
-- Demo controller panel (H17-19): purchase / paycheck / bill / user transfer, fast-forward, demo mode, reset, using P1's `/admin/*`
+| Control | What it does |
+|---|---|
+| **+1 / +3 / +7 days** | Fast-forward the shared clock. Always lands in daytime (9:00-20:59 local); otherwise moves on to 10:00, so quiet hours never silence the demo |
+| **demo mode** | Turns off quiet hours, relaxes the daily cap, shortens typing gaps (emergencies unaffected) |
+| **Quick events** | Chipotle $14, Target $142 (card), TV $400 (checking), paycheck, **rent $1,100 due tomorrow** (creates a shortfall → warning → emergency call), Savings → Checking $200 (the user's own transfer; the watcher completes a matching proposal) |
+| **Purchase / Transfer / Bill** | Custom amounts |
+| **⟲ reset demo** | Finance back to the start (world + clock), then agents (conversation, proposals, outbox). Keeps who has texted the line, so the demo phone still works |
+| **hide** | Collapses the panel for a clean projector view (remembered per browser) |
+
+The buttons call `POST /api/control/:action` on the dashboard (same login), which calls P1's `/admin/*` and P2's `/agents/reset` **on localhost** with the shared secret. The secret never reaches the browser, and `/admin/*` is not public (Caddy returns 404).

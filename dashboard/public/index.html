@@ -73,6 +73,23 @@
   .bubble.failed { outline: 1px solid var(--concern); }
   .meta { font-size: 10.5px; color: var(--faint); align-self: center; margin: 4px 0 0; }
 
+  .controls { display: flex; flex-direction: column; gap: 10px; }
+  .controls[hidden] { display: none; }
+  .crow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .crow .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; min-width: 92px; }
+  button.b { font: inherit; font-size: 13px; color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 9px; padding: 6px 11px; cursor: pointer; white-space: nowrap; }
+  button.b:hover { border-color: #3a4152; background: #20242f; }
+  button.b:disabled { opacity: .5; cursor: progress; }
+  button.b.on { color: var(--good); border-color: #1f4d3a; }
+  button.b.warn { color: var(--concern); border-color: #5a2224; }
+  .crow input, .crow select { font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 8px; width: 96px; }
+  .crow input.w { width: 130px; }
+  #cstatus { font-size: 12.5px; color: var(--muted); min-height: 18px; }
+  #cstatus.err { color: var(--concern); } #cstatus.ok { color: var(--good); }
+  .toggle { margin-left: auto; }
+
   @media (max-width: 1100px) {
     .wrap { grid-template-columns: 1fr; height: auto; }
     .accounts, .gauges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -89,9 +106,49 @@
       <div class="chip" id="who">—</div>
       <div class="chip" id="clock">—</div>
       <div class="spacer"></div>
+      <div class="chip" id="demomode" hidden>demo mode</div>
       <div class="chip" id="queue">queue —</div>
       <div class="chip" id="source">—</div>
     </header>
+
+    <section class="panel" id="controlpanel">
+      <div class="crow"><h2 style="margin:0">Demo controls</h2>
+        <button class="b toggle" id="ctoggle" onclick="toggleControls()">hide</button></div>
+      <div class="controls" id="controls">
+        <div class="crow"><span class="lbl">Clock</span>
+          <button class="b" onclick="ctl('jump',{days:1})">+1 day</button>
+          <button class="b" onclick="ctl('jump',{days:3})">+3 days</button>
+          <button class="b" onclick="ctl('jump',{days:7})">+7 days</button>
+          <button class="b" id="dmbtn" onclick="ctl('demo-mode',{on:!demoOn})">demo mode: off</button>
+        </div>
+        <div class="crow"><span class="lbl">Quick events</span>
+          <button class="b" onclick="ctl('purchase',{amount:14,merchant:'Chipotle',category:'dining',account:'card'})">🌯 Chipotle $14</button>
+          <button class="b" onclick="ctl('purchase',{amount:142,merchant:'Target',category:'shopping',account:'card'})">🎯 Target $142</button>
+          <button class="b" onclick="ctl('purchase',{amount:400,merchant:'Best Buy',category:'electronics',account:'checking'})">📺 TV $400 (checking)</button>
+          <button class="b" onclick="ctl('paycheck',{})">💵 Paycheck</button>
+          <button class="b" onclick="ctl('bill',{label:'Rent',amount:1100,dueInDays:1,essential:true})">🏠 Rent $1,100 due tomorrow</button>
+          <button class="b" onclick="ctl('transfer',{from:'savings',to:'checking',amount:200})">↔ Savings → Checking $200</button>
+        </div>
+        <div class="crow"><span class="lbl">Purchase</span>
+          <input id="pAmt" type="number" min="1" placeholder="$ amount">
+          <input id="pMer" class="w" placeholder="merchant">
+          <select id="pAcct"><option value="card">card</option><option value="checking">checking</option></select>
+          <button class="b" onclick="ctl('purchase',{amount:num('pAmt'),merchant:val('pMer')||undefined,account:val('pAcct')})">post</button>
+          <span class="lbl" style="min-width:auto;margin-left:10px">Transfer</span>
+          <select id="tFrom"></select><span style="color:var(--faint)">→</span><select id="tTo"></select>
+          <input id="tAmt" type="number" min="1" placeholder="$ amount">
+          <button class="b" onclick="ctl('transfer',{from:val('tFrom'),to:val('tTo'),amount:num('tAmt')})">move</button>
+        </div>
+        <div class="crow"><span class="lbl">Bill</span>
+          <input id="bLab" class="w" placeholder="label">
+          <input id="bAmt" type="number" min="1" placeholder="$ amount">
+          <input id="bDays" type="number" min="0" max="30" placeholder="due in days">
+          <button class="b" onclick="ctl('bill',{label:val('bLab')||'Bill',amount:num('bAmt'),dueInDays:num('bDays')??1,essential:true})">add</button>
+          <button class="b warn" style="margin-left:auto" onclick="if(confirm('Reset finance and the agents conversation to the starting state?')) ctl('reset',{})">⟲ reset demo</button>
+        </div>
+        <div id="cstatus"></div>
+      </div>
+    </section>
 
     <section class="panel">
       <h2>Accounts</h2>
@@ -311,10 +368,54 @@ function renderChat(chat) {
   if (atBottom || chat.length < 8) box.scrollTop = box.scrollHeight;
 }
 
+
+const ACCTS = ["checking", "savings", "card", "car_loan", "ira"];
+for (const id of ["tFrom", "tTo"]) $(id).innerHTML = ACCTS.map((a) => `<option value="${a}">${a.replace("_", " ")}</option>`).join("");
+$("tFrom").value = "savings"; $("tTo").value = "checking";
+const val = (id) => $(id).value.trim();
+const num = (id) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : undefined; };
+let demoOn = false;
+
+function setControlsHidden(h) {
+  $("controls").hidden = h; $("ctoggle").textContent = h ? "show" : "hide";
+  try { localStorage.setItem("huddlr.controlsHidden", h ? "1" : "0"); } catch {}
+}
+function toggleControls() { setControlsHidden(!$("controls").hidden); }
+try { setControlsHidden(localStorage.getItem("huddlr.controlsHidden") === "1"); } catch {}
+
+const LABEL = { jump: "Fast-forward", "demo-mode": "Demo mode", purchase: "Purchase", paycheck: "Paycheck", bill: "Bill", transfer: "Transfer", reset: "Reset" };
+async function ctl(action, body) {
+  const st = $("cstatus"); const btns = document.querySelectorAll("#controls button");
+  btns.forEach((b) => (b.disabled = true));
+  st.className = ""; st.textContent = `${LABEL[action] || action}…`;
+  try {
+    const res = await fetch(`/api/control/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || out.message || (out.issues ? out.issues.map((i) => i.message).join(", ") : `HTTP ${res.status}`));
+    st.className = "ok";
+    st.textContent = action === "jump" ? `Jumped to ${dateFmt(out.now, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}${out.landedOnDaytime ? ` (moved ${out.extraHours}h to land in daytime)` : ""}`
+      : action === "demo-mode" ? `Demo mode ${out.sim?.demoMode ? "on: quiet hours off, faster typing" : "off"}`
+      : action === "reset" ? "Reset done: finance and conversation back to the start"
+      : `${LABEL[action]} done`;
+    tick();
+  } catch (e) {
+    st.className = "err"; st.textContent = `${LABEL[action] || action} failed: ${e.message}`;
+  } finally { btns.forEach((b) => (b.disabled = false)); }
+}
+
+function renderSim(sim) {
+  demoOn = !!sim?.demoMode;
+  $("dmbtn").textContent = `demo mode: ${demoOn ? "on" : "off"}`;
+  $("dmbtn").classList.toggle("on", demoOn);
+  $("demomode").hidden = !demoOn;
+  $("demomode").className = "chip live";
+}
+let lastSource = "";
+
 async function tick() {
   try {
     const s = await (await fetch("/api/state", { cache: "no-store" })).json();
-    renderHeader(s); renderAccounts(s.facts); renderGauges(s.facts); renderForecast(s.facts);
+    lastSource = s.source; renderSim(s.sim); renderHeader(s); renderAccounts(s.facts); renderGauges(s.facts); renderForecast(s.facts);
     renderProposals(s); renderEvents(s.facts); renderChat(s.chat || []);
   } catch (e) {
     $("source").className = "chip bad"; $("source").textContent = "● dashboard offline";

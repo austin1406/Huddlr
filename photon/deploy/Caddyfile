@@ -10,7 +10,8 @@ __DOMAIN__ {
 	handle /tools/* {
 		reverse_proxy localhost:4000
 	}
-	# finance: health (public), events + demo controls (need x-huddlr-secret)
+	# finance: health (public), events (needs x-huddlr-secret).
+	# /admin/* is deliberately NOT routed: the dashboard's demo controller calls it on localhost.
 	handle /health {
 		reverse_proxy localhost:4000
 	}
@@ -18,7 +19,7 @@ __DOMAIN__ {
 		reverse_proxy localhost:4000
 	}
 	handle /admin/* {
-		reverse_proxy localhost:4000
+		respond 404
 	}
 	handle /agents/* {
 		reverse_proxy localhost:5000
