@@ -11,6 +11,7 @@ import { createApp } from "./app";
 import { handleChat } from "./chat";
 import { migrate, pool, readClock, type Queryable } from "./db";
 import { maybeSendDigest, pollEvents, runWindfall, type DebateDeps } from "./debate";
+import { maybeWelcome } from "./welcome";
 import { devRoutes } from "./dev";
 import { runFollowUps } from "./followups";
 import { financeClient } from "./finance";
@@ -87,6 +88,8 @@ every(env.pollMs, "inbound", async () => {
   );
   for (const row of r.rows) {
     const at = await now();
+    // A phone's first text ever: the Coach introduces the crew before answering.
+    if (await maybeWelcome(db, { id: Number(row.id), user_phone: row.user_phone }, at)) console.log(`[agents] text ${row.id}: welcomed ${row.user_phone}`);
     // A photo with no text: read the item and price, then can_i_afford.
     if (row.attachment_ids?.length && !row.text?.trim()) {
       const p = await handlePhoto(

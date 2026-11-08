@@ -53,6 +53,12 @@ export function lowestBreakdown(facts: FactsSnapshot) {
   };
 }
 
+/** What the card balance costs in interest each month (balance x APR / 12), computed in code so Card can say it. */
+export function cardMonthlyInterest(facts: FactsSnapshot): number | null {
+  const c = account(facts, "card");
+  return c?.aprPercent ? round2((c.balance * c.aprPercent) / 100 / 12) : null;
+}
+
 /**
  * Only the slice of facts this character talks about, so the model has less to mix up.
  * `event` is the event being reacted to (defaults to the most recent one).
@@ -73,7 +79,7 @@ export function factsFor(id: CharacterId, facts: FactsSnapshot, event?: FinanceE
       lowestBreakdown: lowestBreakdown(facts),
     },
     savings: { account: account(facts, "savings"), runway: indicator(facts, "runway"), savingsRate: indicator(facts, "savings_rate") },
-    card: { account: account(facts, "card"), utilization: indicator(facts, "credit_utilization") },
+    card: { account: account(facts, "card"), utilization: indicator(facts, "credit_utilization"), monthlyInterest: cardMonthlyInterest(facts) },
     car_loan: { account: account(facts, "car_loan"), billReliability: indicator(facts, "bill_reliability") },
     ira: { account: account(facts, "ira"), retirementOnTrack: indicator(facts, "retirement_on_track") },
     coach: { ...facts },
@@ -109,7 +115,7 @@ export function keyNumbers(id: CharacterId, facts: FactsSnapshot, event?: Financ
           out.push(
             `how your lowest point before payday is worked out: ${fmtUsd(b.balanceNow)} now, minus bills ${fmtUsd(b.billsTotal)}` +
               (b.billsBeforeLowest.length ? ` (${b.billsBeforeLowest.map((x) => `${x.label} ${fmtUsd(x.amount)} on ${fmtDate(x.dueDate)}`).join(", ")})` : "") +
-              `, minus everyday spending ${fmtUsd(b.everydaySpending)}, leaves ${fmtUsd(b.lowest)} on ${fmtDate(b.lowestDate)}`,
+              `, minus everyday spending ${fmtUsd(b.everydaySpending)}, ${b.lowest < 0 ? `puts you ${fmtUsd(b.lowest)} below zero` : `leaves ${fmtUsd(b.lowest)}`} on ${fmtDate(b.lowestDate)}`,
           );
       }
       break;
@@ -119,6 +125,8 @@ export function keyNumbers(id: CharacterId, facts: FactsSnapshot, event?: Financ
     case "card": {
       const c = a("card")!;
       out.push(`balance owed: ${fmtUsd(c.balance)}`, `APR: ${c.aprPercent}%`, `utilization: ${ind("credit_utilization")!.value}%`);
+      const interest = cardMonthlyInterest(facts);
+      if (interest) out.push(`monthly interest on this balance: ${fmtUsd(interest)}`);
       break;
     }
     case "car_loan": {
@@ -153,13 +161,18 @@ export function buildPrompt(
   return [
     `You are ${c.name}${c.account ? ", one of the user's bank accounts," : ""} in a group chat with the user and their other accounts.`,
     `Personality: ${c.voice}`,
-    `You always argue for: ${c.wants}`,
+    `Your job: ${c.wants}`,
     ``,
     `How to write:`,
     `- Talk TO the user as "you". Never use their name or call them "the user".`,
     isCoach
-      ? `- At most 3 short sentences: say who is right and why in one sentence, then the action.`
-      : `- Exactly 2 short sentences. Sentence 1: the one number that matters most right now, from KEY NUMBERS. Sentence 2: what you want to happen, from your side, even if the others disagree.`,
+      ? `- At most 3 short sentences: the plan in plain words (where each part of the money goes and why), then the action.`
+      : `- One message, at most 2 short sentences: the one number that matters most right now, from KEY NUMBERS, and what it means for the user in plain words (like "that costs you $X a month in interest").`,
+    ...(isCoach ? [] : [`- Explain, don't persuade. Never ask for the money yourself ("put it in me", "send it to me", "pay me first"); say what it would do for the user.`]),
+    ...(!isCoach && heard?.length
+      ? [`- If you genuinely agree with or build on what one of the others said, you may open by saying so by name, professionally (like "Agreed with IRA on this one." or "Adding to Checking:"). If you're making your own separate point, skip that and just make it.`]
+      : []),
+    `- Calm and confident. Never say you're nervous, worried or scared, and never tell the user to "be careful". No slang.`,
     `- Copy numbers and dates exactly as written in KEY NUMBERS or FACTS. Never add, subtract, round, or invent a number.`,
     `- Plain words, no emoji, no "${c.name}:" prefix, no hashtags.`,
     `- You can't move money and never ask for passwords, codes, or account numbers. No specific investment picks.`,
@@ -176,7 +189,7 @@ export function buildPrompt(
                 const winner = destName(String(plan.lines[0].destination));
                 const why = REASON[plan.lines[0].reasonCode] ?? plan.lines[0].reasonCode;
                 return heard?.some((h) => h.name === winner)
-                  ? [`The plan sides with ${winner} (${why}). Say ${winner} is right, not another account.`]
+                  ? [`The plan agrees with ${winner} (${why}). If you name an account the plan agrees with, it's ${winner}, not another account.`]
                   : [`The plan sends money to ${winner} (${why}), but ${winner} hasn't spoken. Don't say anyone "is right"; just give the reason in plain words.`];
               })()
             : []),
@@ -218,19 +231,23 @@ export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | nu
   const a = (x: Account["id"]) => account(facts, x)!;
   switch (id) {
     case "card":
-      return `I'm carrying ${usd(a("card").balance)} at ${a("card").aprPercent}% APR. Paying me down saves the most interest.`;
+      return cardMonthlyInterest(facts)
+        ? `You owe ${usd(a("card").balance)} at ${a("card").aprPercent}% APR, which costs about ${usd(cardMonthlyInterest(facts)!)} a month in interest. Paying it down cuts that cost.`
+        : `You owe ${usd(a("card").balance)} at ${a("card").aprPercent}% APR. Paying it down cuts the interest you pay.`;
     case "checking":
       return facts.forecast.firstNegativeDate
-        ? `Heads up: I'm at ${usd(a("checking").balance)} and my forecast goes negative soon.`
+        ? `Checking is at ${usd(a("checking").balance)}, and the forecast dips below zero before payday.`
         : `I'm at ${usd(a("checking").balance)}; safe to spend until payday is ${usd(facts.forecast.safeToSpendUntilPayday)}.`;
     case "savings":
       return `I'm holding ${usd(a("savings").balance)}, about ${indicator(facts, "runway")!.value} months of cushion.`;
     case "car_loan":
-      return `My ${usd(a("car_loan").monthlyPayment ?? 0)} payment can't slip.`;
+      return `The ${usd(a("car_loan").monthlyPayment ?? 0)} car payment comes out every month, with ${usd(a("car_loan").balance)} still owed.`;
     case "ira":
-      return `I'm at ${usd(a("ira").balance)}. Don't leave the employer match on the table.`;
+      return a("ira").unclaimedMatchThisYear
+        ? `${usd(a("ira").unclaimedMatchThisYear!)} of employer match is still unclaimed this year. Contributing would capture that free money.`
+        : `Your IRA is at ${usd(a("ira").balance)}.`;
     case "coach":
-      return `Let's look at the plan before anyone moves money.`;
+      return `Here's where things stand. Ask me about any account, or @mention one of them, and I'll walk you through it.`;
   }
 }
 
@@ -292,6 +309,19 @@ export function coachProblem(
 }
 
 /**
+ * House style, enforced in code like the number checker (one retry, then the template):
+ * accounts explain instead of asking for the money, and nobody sounds nervous or uses slang.
+ */
+export function styleProblem(id: CharacterId, text: string): string | null {
+  if (id !== "coach" && /\b(send|put|give|move|transfer|pay|throw|toss)\b[^.?!]{0,40}\b(to|into|in|toward|with|my way)\s+me\b|\bpay me\b|\bmy way\b|\b(right )?here (with|in) me\b|\bbelongs? (here|with me|down here|right here)\b|\bwhere (it|they|that|this) belongs?\b|\b(put|send|move|transfer|give|throw|toss)\b[^.?!]{0,40}\b(right |over |down )?here\b/i.test(text))
+    return `Explain what it means for the user instead of asking for the money ("put it in me", "pay me first").`;
+  if (/\b(nervous|anxious|worried|worry|scared|scary|panic\w*|freak\w*|be careful|stressed|terrif\w*)\b/i.test(text))
+    return `Keep the tone calm and confident: no "nervous", "worried" or "be careful".`;
+  if (/\b(lol|lmao|bro|dude|ngl|tbh|fr|gonna|wanna|gotta|yo|bruh|omg)\b/i.test(text)) return `No slang; keep it professional.`;
+  return null;
+}
+
+/**
  * Produce one grounded line for a character.
  * opts.model replaces Gemini in tests; opts.deadline is a real-clock ms timestamp (delivery timing, not calendar).
  */
@@ -326,7 +356,7 @@ export async function speak(
       const text = await model(prompt);
       // Checked against this character's own slice, not all 45 forecast days, so stray numbers can't sneak through.
       const check = checkMessage(text, ...sources);
-      const problem = check.ok ? coachProblem(id, text, opts.plan, opts.ask, opts.heard) : null;
+      const problem = check.ok ? (coachProblem(id, text, opts.plan, opts.ask, opts.heard) ?? styleProblem(id, text)) : null;
       attempts.push({ text, ...check, ...(problem ? { ok: false, error: problem } : {}) });
       if (check.ok && !problem && text) return { text, source, attempts, ms: Date.now() - started };
       prompt += problem

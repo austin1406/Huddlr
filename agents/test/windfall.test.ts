@@ -72,15 +72,18 @@ test("'$600 bonus, what should I do?' -> two accounts debate, the Coach closes w
   assert.equal(r.debate?.length, 3, `speakers: ${r.debate}`);
 
   const sent = await outbox();
-  assert.equal(sent.length, 3);
+  assert.equal(sent.length, 4, "Coach opener, two accounts, Coach plan");
+  assert.equal(sent[0].speaker, "coach", "the Coach answers the question first");
+  assert.match(sent[0].text, new RegExp(`^Good question\\. ${r.debate![0].replace("car_loan", "Car Loan")}`, "i"));
+  assert.match(sent[0].text, /weigh in, then my plan\.$/);
   assert.equal(sent.at(-1)!.speaker, "coach", "Coach goes last");
-  assert.notEqual(sent[0].speaker, sent[1].speaker);
+  assert.notEqual(sent[1].speaker, sent[2].speaker);
   assert.ok(sent.every((m) => m.priority === 1 && m.reply_to != null), "a reply to the user's text, not proactive");
 
   // The account P1's plan favors is one of the speakers, so the Coach can side with someone who actually spoke.
   const plan = await finance.plan(600);
   const ask = proposalFromPlan(plan)!;
-  assert.ok(sent.slice(0, 2).some((m) => m.speaker === String(plan.lines[0].destination)), `plan favors ${plan.lines[0].destination}`);
+  assert.ok(sent.slice(1, 3).some((m) => m.speaker === String(plan.lines[0].destination)), `plan favors ${plan.lines[0].destination}`);
   assert.match(sent.at(-1)!.text, new RegExp(`Reply YES to: ${ask.actionText.replace(/\$/g, "\\$").replace(/\./g, "\\.")}`));
 
   const pending = await proposals.getPending(PHONE);

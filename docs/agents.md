@@ -67,6 +67,20 @@ finance isn't on localhost:4000).
 - "Can I afford a $40 dinner?" by text also goes straight to `can_i_afford`, so the answer is computed, not generated.
 - Locally: `curl -XPOST localhost:5055/agents/dev/photo -d '{"path":"test/fixtures/price-tag.png"}'`.
 
+## How a multi-character reply reads
+
+1. The Coach answers the question first (reply to the user's text) and says who's speaking: "Good question. Card and
+   Checking weigh in, then my plan."
+2. Each account explains, in turn, one number and what it means for the user ("that costs you $48.00 a month in
+   interest"). Never "put it in me": code rejects that, nervous wording ("worried", "be careful") and slang, then
+   retries once before the pre-written line.
+3. A later account can answer an earlier one by name ("Adding to Card: …"); it's threaded under that message in
+   iMessage via `outbox.reply_to_outbox`.
+4. The Coach closes with the plan, each part with its own amount, and "Reply YES to: …".
+
+A phone's first text ever gets the Coach's welcome first ("Meet your money: 🏦 Checking, 🐷 Savings, …"), built from
+`contracts/cast.json`, once per phone (again after a reset).
+
 ## Talking to one character, and celebrations
 
 - **@-mentions:** a text that starts with `@savings`, `@card`, `@car`, `@ira`, `@checking` or `@coach` (also `@piggy`,
