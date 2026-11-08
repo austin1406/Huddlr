@@ -130,7 +130,7 @@ test("account summary: every account, priorities and the waiting plan, built in 
   const text = (await last()).text;
   assert.equal(text.split("\n")[0], "Here's where you stand:");
   for (const line of [/🏦 Checking: \$1,186\.50, with \$437\.50 safe to spend until payday on Nov 20\./, /🐷 Savings: \$900\.00, enough to cover about 2 weeks of must-pay bills if your income stopped\./,
-    /💳 Card: \$2,400\.00 owed at 24% APR, about \$48\.00 a month in interest\./, /🚗 Car Loan: \$14,500\.00 owed, \$320\.00 a month\./,
+    /💳 Card: \$2,400\.00 owed at 24% APR, about \$48\.00 a month in interest\./, /🧾 Loan: \$14,500\.00 owed at 6\.9%, \$320\.00 a month \(about \$83\.38 interest, \$236\.62 toward what you owe\); paid off around Apr 2031\./,
     /🌱 IRA: \$8,200\.00, with \$150\.00 of employer match still unclaimed\./, /Your priorities: IRA first; Savings last\./, /Still to do: Move \$150\.00 from Checking to IRA in your bank app\./])
     assert.match(text, line);
 });
@@ -198,4 +198,30 @@ test("'what does that mean' can't just repeat the last message; the fallback exp
   }
   assert.match(explainTemplate("savings", facts), /backup if a paycheck didn't come\. Right now it would pay your must-pay bills for about 2 weeks/);
   assert.match(explainTemplate("card", facts), /APR is the yearly interest rate on what you owe\. On your \$2,400\.00 balance at 24%, that's about \$48\.00 a month/);
+});
+
+test("any loan: the Loan character breaks it down (interest vs principal, payoff, extra payments), every number grounded", async () => {
+  const { loanBreakdown, keyNumbers, factsFor, template, explainTemplate, cast } = await import("../src/character");
+  const { checkMessage } = await import("../src/checker");
+  const { parseMention, explainer, pickResponder } = await import("../src/chat");
+  const app = createApp({ secret: "", state: new StubState("normal") });
+  const facts = await financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch).facts();
+  const b = loanBreakdown(facts)!;
+  // $14,500 at 6.9% APR, $320/month: standard amortization.
+  assert.equal(b.interestThisMonth, 83.38);
+  assert.equal(b.principalThisMonth, 236.62);
+  assert.equal(b.interestThisMonth + b.principalThisMonth, 320);
+  assert.equal(b.monthsLeft, 53);
+  assert.equal(b.payoffMonth, "Apr 2031");
+  assert.ok(b.monthsSooner > 0 && b.interestSaved > 0, "an extra $100 a month finishes sooner and saves interest");
+  const slice = factsFor("car_loan", facts, null);
+  for (const k of keyNumbers("car_loan", facts, null)) assert.equal(checkMessage(k.replace(/^[^:]+: /, ""), slice).ok, true, k);
+  for (const t of [template("car_loan", facts), explainTemplate("car_loan", facts)]) {
+    assert.equal(checkMessage(t, slice).ok, true, t);
+    assert.doesNotMatch(t, /car loan/i, "it's 'your loan', not 'your car loan'");
+  }
+  assert.equal(cast.find((c) => c.id === "car_loan")!.name, "Loan");
+  for (const t of ["@loan how much is left", "@student loan when is it paid off", "@mortgage", "@car loan hi"]) assert.equal(parseMention(t)?.who, "car_loan", t);
+  assert.equal(explainer("what does principal mean"), "car_loan");
+  assert.equal(pickResponder("when will my loan be paid off"), "car_loan");
 });

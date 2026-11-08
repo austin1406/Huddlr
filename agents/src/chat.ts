@@ -20,7 +20,8 @@ const MENTION_ALIASES: Record<string, CharacterId> = {
   checking: "checking", check: "checking", bank: "checking",
   savings: "savings", saving: "savings", piggy: "savings",
   card: "card", credit: "card", creditcard: "card",
-  carloan: "car_loan", car_loan: "car_loan", car: "car_loan", loan: "car_loan",
+  carloan: "car_loan", car_loan: "car_loan", car: "car_loan", loan: "car_loan", loans: "car_loan", autoloan: "car_loan",
+  studentloan: "car_loan", student: "car_loan", mortgage: "car_loan", debtloan: "car_loan",
   ira: "ira", retirement: "ira",
   coach: "coach",
 };
@@ -60,7 +61,7 @@ export function isFollowUp(text: string): boolean {
   return /\b(why|what about|where (do|should|does|did) i|where'?d|so where|which one|confus\w*|explain|instead|huh|wait|what does (that|this) mean|i don'?t get|how (did|come|is that|so)|i thought|that'?s (not|wrong)|doesn'?t (add up|make sense)|what do you mean|wdym|(come|get|got) (that|it|\$?[\d,.]+) from|from where)\b|\?\?/i.test(text);
 }
 
-const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Loan", ira: "IRA" };
 
 /** The pending proposal, with its plan spelled out in words (built from the plan's own numbers). */
 async function pendingPlan(db: Queryable, phone: string) {
@@ -113,7 +114,7 @@ export function explainer(text: string): CharacterId | null {
   if (/\b(employer match|match|ira|retirement|401k)\b/.test(t)) return "ira";
   if (/\b(cushion|runway|emergency fund|essentials|must-pay|savings)\b/.test(t)) return "savings";
   if (/\b(shortfall|buffer|safe to spend|payday|lowest|checking|negative)\b/.test(t)) return "checking";
-  if (/\b(car loan|car payment|loan)\b/.test(t)) return "car_loan";
+  if (/\b(car loan|car payment|loans?|principal|payoff|pay off|amortiz\w*|mortgage|student loans?)\b/.test(t)) return "car_loan";
   if (/\b(plan|yes|proposal)\b/.test(t)) return "coach";
   return null;
 }
@@ -127,14 +128,15 @@ const GLOSSARY = [
   `Employer match: your job adds money to your IRA when you put money in; any match you don't claim is free money left behind.`,
   `Shortfall: Checking would dip below zero before your next paycheck.`,
   `Safe to spend: what you can spend before payday and still keep your buffer.`,
-  `Must-pay bills: rent, utilities, phone, the car payment and the card minimum.`,
+  `Must-pay bills: rent, utilities, phone, the loan payment and the card minimum.`,
+  `Principal: the part of the loan you still owe. Each payment covers that month's interest first; the rest lowers the principal.`,
 ].join(" ");
 
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
 export function pickResponder(text: string): CharacterId {
   const t = text.toLowerCase();
   if (/\b(credit|card|apr|interest|utiliz)/.test(t)) return "card";
-  if (/\b(car|loan|auto)\b/.test(t)) return "car_loan";
+  if (/\b(car|loans?|auto|mortgage|student loans?|principal|payoff)\b/.test(t)) return "car_loan";
   if (/\b(ira|retire|retirement|401k|match)\b/.test(t)) return "ira";
   if (/\b(saving|savings|emergency fund|cushion|runway)\b/.test(t)) return "savings";
   if (/\b(checking|balance|afford|spend|rent|bill|paycheck|payday)\b/.test(t)) return "checking";

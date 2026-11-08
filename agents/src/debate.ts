@@ -38,7 +38,7 @@ export interface DebateResult {
   planMs: number | null;
 }
 
-const ACCOUNT_LABEL: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
+const ACCOUNT_LABEL: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Loan", ira: "IRA" };
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** How much money the Coach is planning for. Null means comment only, no plan. */

@@ -93,7 +93,7 @@ test("welcome: the Coach introduces the crew on a phone's first text, once", asy
   assert.equal(out.rows.length, 1);
   assert.equal(out.rows[0].speaker, "coach");
   assert.equal(out.rows[0].text, welcomeText());
-  assert.match(welcomeText(), /^Meet your money: 🏦 Checking, 🐷 Savings, 💳 Card, 🚗 Car Loan and 🌱 IRA each watch one account\. 🧭 Coach always gives the final plan\. Ask anything, or @mention one of them \(like @Savings\)\.$/);
+  assert.match(welcomeText(), /^Meet your money: 🏦 Checking, 🐷 Savings, 💳 Card, 🧾 Loan and 🌱 IRA each watch one account\. 🧭 Coach always gives the final plan\. Ask anything, or @mention one of them \(like @Savings\)\.$/);
 });
 
 test("an option with a false 'Adding to X:' lead-in loses it and isn't threaded under X", async () => {
@@ -109,4 +109,10 @@ test("an option with a false 'Adding to X:' lead-in loses it and isn't threaded 
   const ira = (await db.query<{ text: string; reply_to_outbox: number | null }>("SELECT text, reply_to_outbox FROM outbox WHERE speaker = 'ira'")).rows[0];
   assert.equal(ira.text, "Option: claim the $150.00 employer match.");
   assert.equal(ira.reply_to_outbox, null);
+});
+
+test("a reply cut off mid-sentence is never sent as is", () => {
+  assert.match(styleProblem("car_loan", "Paying an extra $100.00 a month would")!, /cut off/);
+  for (const ok of ["That saves $9.14 a month.", "Paid off around Apr 2031!", "Want the breakdown?", 'Say "your loan."'])
+    assert.equal(styleProblem("car_loan", ok), null, ok);
 });

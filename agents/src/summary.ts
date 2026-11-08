@@ -1,7 +1,7 @@
 // "Can you give me a summary of my account?" -> every account in one message, built in code from P1's facts
 // (so every number is exact and it costs no Gemini call), plus the user's priorities and any plan waiting for YES.
 import type { FactsSnapshot } from "../../contracts/src";
-import { cardMonthlyInterest, cast, cushionWords } from "./character";
+import { cardMonthlyInterest, cast, cushionWords, loanBreakdown } from "./character";
 import { describePriorities, type Priorities } from "./priorities";
 
 export const isSummaryQuestion = (text: string) =>
@@ -28,7 +28,11 @@ export function accountSummary(facts: FactsSnapshot, priorities: Priorities | nu
   const interest = cardMonthlyInterest(facts);
   if (card) lines.push(`${emoji("card")} Card: ${usd(card.balance)} owed${card.aprPercent ? ` at ${card.aprPercent}% APR` : ""}${interest ? `, about ${usd(interest)} a month in interest` : ""}.`);
   const loan = a("car_loan");
-  if (loan) lines.push(`${emoji("car_loan")} Car Loan: ${usd(loan.balance)} owed${loan.monthlyPayment ? `, ${usd(loan.monthlyPayment)} a month` : ""}.`);
+  const lb = loanBreakdown(facts);
+  if (loan)
+    lines.push(lb
+      ? `${emoji("car_loan")} Loan: ${usd(lb.owed)} owed at ${lb.aprPercent}%, ${usd(lb.monthlyPayment)} a month (about ${usd(lb.interestThisMonth)} interest, ${usd(lb.principalThisMonth)} toward what you owe); paid off around ${lb.payoffMonth}.`
+      : `${emoji("car_loan")} Loan: ${usd(loan.balance)} owed${loan.monthlyPayment ? `, ${usd(loan.monthlyPayment)} a month` : ""}.`);
   const ira = a("ira");
   if (ira) lines.push(`${emoji("ira")} IRA: ${usd(ira.balance)}${ira.unclaimedMatchThisYear ? `, with ${usd(ira.unclaimedMatchThisYear)} of employer match still unclaimed` : ""}.`);
   const prio = describePriorities(priorities);

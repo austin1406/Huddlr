@@ -1,6 +1,6 @@
 # Agents (P2) runbook
 
-The cast (Checking, Savings, Card, Car Loan, IRA, Coach), the moderator, the number checker, proposals, memory,
+The cast (Checking, Savings, Card, Loan, IRA, Coach), the moderator, the number checker, proposals, memory,
 follow-ups, and escalation. Code in `agents/`, shapes in `contracts/src/agents.ts`, tables in `contracts/p2_agents.sql`.
 
 **The rule everything is built around:** every number a character says comes from P1's finance engine. Gemini only
@@ -95,6 +95,14 @@ accounts first) gives its option, and the Coach closes with the code-built botto
 
 A phone's first text ever gets the Coach's welcome first ("Meet your money: 🏦 Checking, 🐷 Savings, …"), built from
 `contracts/cast.json`, once per phone (again after a reset).
+
+## Loan
+
+The Loan character (🧾, id `car_loan` in the contracts) covers any loan: `@loan`, `@student loan`, `@mortgage`,
+`@car loan` all reach it. It breaks the loan down, computed in code from P1's balance, APR and payment: this month's
+payment split into interest and principal, months to payoff and the payoff month, interest still to pay, and what an
+extra $100 a month would save. Standard amortization estimates ("about"): P1's engine doesn't accrue loan interest.
+P3's dashboard still labels it "🚗 Car Loan" (its own hard-coded map, `dashboard/public/index.html`).
 
 ## Talking to one character, and celebrations
 
