@@ -104,6 +104,11 @@ payment split into interest and principal, months to payoff and the payoff month
 extra $100 a month would save. Standard amortization estimates ("about"): P1's engine doesn't accrue loan interest.
 P3's dashboard still labels it "🚗 Car Loan" (its own hard-coded map, `dashboard/public/index.html`).
 
+Loans the user tells us about by text ("I took a loan out for tuition", "it's 10000, add that in", "5%, $150 a
+month") are saved in memory_facts (`loan:<name>`). Loan asks once for whatever's missing, breaks each one down the same
+way when it has the rate and payment, and always says the total owed on all loans. They aren't in P1's ledger, so
+forecasts and plans don't include their payments (Loan says so when one is added).
+
 ## Talking to one character, and celebrations
 
 - **@-mentions:** a text that starts with `@savings`, `@card`, `@car`, `@ira`, `@checking` or `@coach` (also `@piggy`,

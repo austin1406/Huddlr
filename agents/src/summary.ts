@@ -2,6 +2,7 @@
 // (so every number is exact and it costs no Gemini call), plus the user's priorities and any plan waiting for YES.
 import type { FactsSnapshot } from "../../contracts/src";
 import { cardMonthlyInterest, cast, cushionWords, loanBreakdown } from "./character";
+import { describeLoan, totalLoansOwed, type ReportedLoan } from "./loans";
 import { describePriorities, type Priorities } from "./priorities";
 
 export const isSummaryQuestion = (text: string) =>
@@ -11,7 +12,7 @@ const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFrac
 const day = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 const emoji = (id: string) => cast.find((c) => c.id === id)?.emoji ?? "";
 
-export function accountSummary(facts: FactsSnapshot, priorities: Priorities | null, waiting: string | null): string {
+export function accountSummary(facts: FactsSnapshot, priorities: Priorities | null, waiting: string | null, reported: ReportedLoan[] = []): string {
   const a = (id: string) => facts.accounts.find((x) => x.id === id);
   const f = facts.forecast;
   const s = facts.shortfall;
@@ -33,6 +34,12 @@ export function accountSummary(facts: FactsSnapshot, priorities: Priorities | nu
     lines.push(lb
       ? `${emoji("car_loan")} Loan: ${usd(lb.owed)} owed at ${lb.aprPercent}%, ${usd(lb.monthlyPayment)} a month (about ${usd(lb.interestThisMonth)} interest, ${usd(lb.principalThisMonth)} toward what you owe); paid off around ${lb.payoffMonth}.`
       : `${emoji("car_loan")} Loan: ${usd(loan.balance)} owed${loan.monthlyPayment ? `, ${usd(loan.monthlyPayment)} a month` : ""}.`);
+  // Loans the user told us about (not in the bank data), then everything owed on loans together.
+  for (const r of reported) {
+    const d = describeLoan(r, facts.localDate).replace(/^your /, "");
+    lines.push(`${emoji("car_loan")} ${d.charAt(0).toUpperCase()}${d.slice(1)} (you told me about this one).`);
+  }
+  if (reported.some((r) => r.owed != null)) lines.push(`All loans together: ${usd(totalLoansOwed(facts, reported))} owed.`);
   const ira = a("ira");
   if (ira) lines.push(`${emoji("ira")} IRA: ${usd(ira.balance)}${ira.unclaimedMatchThisYear ? `, with ${usd(ira.unclaimedMatchThisYear)} of employer match still unclaimed` : ""}.`);
   const prio = describePriorities(priorities);

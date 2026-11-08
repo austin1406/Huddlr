@@ -5,6 +5,7 @@ import { proposalFromPlan, type Waiting } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
 import { allMovesText, leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
+import { describeLoan, handleLoanReport, loadReportedLoans, loanSources, totalLoansOwed } from "./loans";
 import { bottomLine } from "./bottomline";
 import { isBottomLineQuestion } from "./replies";
 import { doLine, explainTemplate, lowestBreakdown, speak } from "./character";
@@ -190,7 +191,7 @@ export async function handleChat(
   // "Give me a summary of my account": every account in one message, built in code. No YES invite beyond
   // naming the plan that's already waiting.
   if (isSummaryQuestion(text) && (!parseMention(text) || parseMention(text)!.who === "coach")) {
-    const summary = accountSummary(await deps.facts(), await loadPriorities(deps.db, deps.userPhone), pending?.actionText ?? null);
+    const summary = accountSummary(await deps.facts(), await loadPriorities(deps.db, deps.userPhone), pending?.actionText ?? null, await loadReportedLoans(deps.db, deps.userPhone));
     await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:summary`, speaker: "coach", text: summary });
     return { learned: 0, responder: "coach" };
   }
@@ -219,6 +220,16 @@ export async function handleChat(
     }
     await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:priorities`, speaker: "coach", text: reply });
     return { learned: 1, responder: "coach" };
+  }
+
+  // "I took a loan out for tuition", "it's 10000, add that in", "5%, $150 a month": the Loan character saves it,
+  // breaks it down when it has the rate and payment, and asks for what's missing. Built in code, exact.
+  if (!parseMention(text) || parseMention(text)!.who === "car_loan") {
+    const reply = await handleLoanReport(deps.db, deps.userPhone, parseMention(text)?.rest || text, await deps.facts(), now);
+    if (reply) {
+      await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:loan`, speaker: "car_loan", text: reply });
+      return { learned: 1, responder: "car_loan" };
+    }
   }
 
   // "I got a $600 bonus, what should I do?" gets the whole crew: a debate and a plan to say YES to.
@@ -268,12 +279,16 @@ export async function handleChat(
     : followUp && !explainingPlan
       ? `The user texted: "${question}". They're asking about the conversation below, most likely your last message. Explain plainly where its numbers come from, step by step, using your KEY NUMBERS (for Checking: the balance now, the bills before the low point, everyday spending, and the lowest point). If your last message was a "can I afford" answer, its lowest balance already has that purchase taken out: say the lowest point without it, then that the purchase takes it to the number you gave. If they mixed up two numbers, say which is which using ALL BALANCES. Answer the question; skip your usual pitch this time.`
       : `The user texted: "${question}". Answer them directly in character.`;
+  const reported = responder === "car_loan" ? await loadReportedLoans(deps.db, deps.userPhone) : [];
   const balances = facts.accounts
     .map((a) => `${ACCOUNT_NAMES[a.id] ?? a.name} ${a.kind === "credit_card" || a.kind === "car_loan" ? "owed " : ""}$${a.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
     .join(", ");
   const context = [
     ...(recent.lines.length ? [`RECENT CONVERSATION (oldest first):`, ...recent.lines] : []),
     ...(followUp ? [`ALL BALANCES: ${balances}.`] : []),
+    ...(responder === "car_loan" && reported.length
+      ? [`OTHER LOANS THE USER TOLD YOU ABOUT (not in the bank data): ${reported.map((l) => describeLoan(l, facts.localDate)).join("; ")}. All loans together: $${totalLoansOwed(facts, reported).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} owed. Mention them when they matter.`]
+      : []),
     ...(pending ? [`THE PLAN (the user makes the move themselves in their bank app; you never ask for a YES): "${doLine(pending.actionText)}" The full plan: ${pending.split}.`] : []),
     ...(recent.lines.length || pending
       ? [`Answer their latest text as part of this conversation, not from scratch. If they're confused about the plan, explain plainly what it does and why, with its numbers. Never contradict the waiting plan or invent a different one.`]
@@ -283,6 +298,10 @@ export async function handleChat(
     model: deps.model,
     // "What does that mean?" must rephrase the last message, not repeat it (code-enforced, one retry).
     ...((explain || followUp) && recent.lastText ? { avoidRepeating: [recent.lastText] } : {}),
+    // Loan, asked how things stand, must count the loans the user told us about: the total across all of them.
+    ...(responder === "car_loan" && !explain && reported.some((l) => l.owed != null)
+      ? { mustMention: [{ text: `$${totalLoansOwed(facts, reported).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, why: "the total owed on all their loans, including the ones they told you about" }] }
+      : {}),
     // The Coach explaining the waiting plan is held to the same code-enforced rules as in a debate: the exact YES line,
     // and nobody is called "right" who didn't speak just now (no "Savings is right because…" out of nowhere).
     ...(explainingPlan && pending ? { plan: pending.coachPlan, ask: allMovesText(pending.coachPlan, pending.coachPlan.lines[0] ?? null, { windfall: pending.source?.startsWith("chat_windfall_") ?? false }) ?? pending.actionText, heard: [] } : {}),
@@ -295,10 +314,14 @@ export async function handleChat(
       ...(pending ? [pending.plan] : []),
       ...(followUp ? [facts.accounts] : []),
       ...(responder === "checking" ? [lowestBreakdown(facts)] : []),
+      ...(responder === "car_loan" ? [...loanSources(reported, facts.localDate), totalLoansOwed(facts, reported)] : []),
     ],
   });
   // An "explain" whose Gemini answer couldn't be sent gets a plain explanation, not the character's usual line.
-  const text2 = explain && !explainingPlan && r.source === "template" ? explainTemplate(responder, facts) : r.text;
+  let text2 = explain && !explainingPlan && r.source === "template" ? explainTemplate(responder, facts) : r.text;
+  // The Loan character's fallback still counts the loans the user told us about.
+  if (responder === "car_loan" && r.source === "template" && reported.some((l) => l.owed != null))
+    text2 += ` With your other loans, you owe $${totalLoansOwed(facts, reported).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on loans in total.`;
   await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: text2 });
   return { learned: 0, responder };
 }
