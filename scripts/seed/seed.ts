@@ -49,6 +49,7 @@ export interface PlannedPurchase {
 /**
  * Builds the discretionary purchase history from seedHints, then scales it so the daily average
  * matches spending.averageDailyDiscretionary exactly (P1's golden test compares against it).
+ * Amounts are whole dollars: Nessie drops the cents, so cents would make the stored total drift.
  */
 export function planPurchases(p: Persona, rand: () => number): PlannedPurchase[] {
   const days = p.seedHints.historyDays;
@@ -61,14 +62,29 @@ export function planPurchases(p: Persona, rand: () => number): PlannedPurchase[]
       }
     });
   }
-  const targetCents = cents(p.spending.averageDailyDiscretionary * days);
+  const target = Math.round(p.spending.averageDailyDiscretionary * days);
   const rawTotal = raw.reduce((s, x) => s + x.amount, 0);
-  const scale = (targetCents / 100) / rawTotal;
-  const out = raw.map((x) => ({ ...x, amount: cents(x.amount * scale) / 100 }));
-  // Put any rounding remainder on the last purchase so the total is exact to the cent.
-  const diff = targetCents - out.reduce((s, x) => s + cents(x.amount), 0);
-  out[out.length - 1].amount = (cents(out[out.length - 1].amount) + diff) / 100;
+  const scale = target / rawTotal;
+  const out = raw.map((x) => ({ ...x, amount: Math.max(1, Math.round(x.amount * scale)) }));
+  // Spread the rounding remainder $1 at a time across purchases so the total is exact.
+  let diff = target - out.reduce((s, x) => s + x.amount, 0);
+  for (let i = 0; diff !== 0; i = (i + 1) % out.length) {
+    const step = diff > 0 ? 1 : -1;
+    if (out[i].amount + step >= 1) {
+      out[i].amount += step;
+      diff -= step;
+    }
+  }
   return out;
+}
+
+/** The next date on or after `from` that falls on dayOfMonth (1-28), as YYYY-MM-DD. */
+export function nextDueDate(from: Date, dayOfMonth: number): string {
+  const y = from.getUTCFullYear();
+  const m = from.getUTCMonth();
+  const thisMonth = new Date(Date.UTC(y, m, dayOfMonth, 12));
+  const due = thisMonth.getTime() >= Date.UTC(y, m, from.getUTCDate(), 12) ? thisMonth : new Date(Date.UTC(y, m + 1, dayOfMonth, 12));
+  return isoDay(due);
 }
 
 async function findCustomer(api: Nessie, p: Persona): Promise<string | undefined> {
@@ -86,24 +102,29 @@ async function main() {
   const dateFor = (daysAgo: number) => isoDay(new Date(today.getTime() - daysAgo * DAY_MS));
   const days = p.seedHints.historyDays;
 
-  if (RESET) {
-    console.log("Reset: deleting all Nessie data for this key (shared with P1)");
-    for (const t of ["Purchases", "Deposits", "Bills", "Transfers", "Accounts", "Customers"] as const) {
-      await api.deleteAll(t);
-    }
-  } else {
-    const existing = await findCustomer(api, p);
-    if (existing) {
-      console.log(`Customer already seeded (${existing}). Use --reset to rebuild.`);
+  // Nessie has no bulk delete, and customers, purchases and merchants can't be deleted at all
+  // (docs/nessie.md). Accounts can, so a reset deletes the demo customer's accounts (their
+  // purchases, deposits and bills go with them) and rebuilds them under the same customer.
+  const existing = await findCustomer(api, p);
+  if (existing) {
+    const accounts = await api.get<{ _id: string; type: string }[]>(`/customers/${existing}/accounts`).catch(() => []);
+    if (accounts.length && !RESET) {
+      console.log(`Customer already seeded (${existing}). Use --reset to rebuild its accounts.`);
       return;
+    }
+    for (const a of accounts) {
+      console.log(`Reset: deleting ${a.type} account ${a._id}`);
+      await api.req("DELETE", `/accounts/${a._id}`);
     }
   }
 
-  const customerId = await api.create("/customers", {
-    first_name: p.customer.firstName,
-    last_name: p.customer.lastName,
-    address: ADDRESS,
-  });
+  const customerId =
+    existing ??
+    (await api.create("/customers", {
+      first_name: p.customer.firstName,
+      last_name: p.customer.lastName,
+      address: ADDRESS,
+    }));
   // Balances are sent exactly as in persona.json. If Nessie only accepts integers, P1's spike
   // (docs/nessie.md) will say so and the own-ledger mirror covers the cents.
   const acct = (type: string, nickname: string, balance: number) =>
@@ -112,10 +133,13 @@ async function main() {
   const savings = await acct("Savings", "Savings", p.accounts.savings.balance);
   const card = await acct("Credit Card", "Card", p.accounts.card.balance);
 
+  // Merchants can't be deleted, so reuse ones with the same name instead of piling up copies.
+  const knownMerchants = DRY ? [] : await api.get<{ _id: string; name: string }[]>("/merchants").catch(() => []);
   const merchantIds: string[] = [];
   for (const m of p.seedHints.merchants) {
+    const found = knownMerchants.find((k) => k.name === m.name)?._id;
     merchantIds.push(
-      await api.create("/merchants", { name: m.name, category: m.category, address: ADDRESS, geocode: { lat: 32.98, lng: -96.75 } }),
+      found ?? (await api.create("/merchants", { name: m.name, category: m.category, address: ADDRESS, geocode: { lat: 32.98, lng: -96.75 } })),
     );
   }
 
@@ -158,10 +182,12 @@ async function main() {
     }
   }
 
-  // Upcoming bills as recurring, so the forecast can see them.
+  // Upcoming bills as recurring, so the forecast can see them. payment_date is the next due date:
+  // a bill without one breaks every read of the account's bill list.
   for (const b of p.recurringBills) {
     await api.create(`/accounts/${checking}/bills`, {
-      status: "recurring", payee: b.label, nickname: b.id, recurring_date: b.dayOfMonth, payment_amount: b.amount,
+      status: "recurring", payee: b.label, nickname: b.id, payment_date: nextDueDate(today, b.dayOfMonth),
+      recurring_date: b.dayOfMonth, payment_amount: b.amount,
     });
   }
 
