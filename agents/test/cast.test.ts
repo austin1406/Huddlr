@@ -41,11 +41,15 @@ test("each prompt carries the character's own account and the event", () => {
   assert.match(buildPrompt("coach", normal, "x", null, plan), /PLAN \(from the finance engine\):/);
 });
 
-test("prompts lead with formatted key numbers, a stance, and talk to 'you'", () => {
+test("prompts lead with formatted key numbers, explain (not persuade), stay calm, and talk to 'you'", () => {
   const p = buildPrompt("checking", shortfall, "x", ev("forecast_problem"));
   assert.match(p, /short by \$43\.00 on Dec 2/);
   assert.match(p, /a transfer of \$143\.00 fixes it/);
-  assert.match(p, /You always argue for: Never go negative/);
+  assert.match(p, /Your job: Explain what's coming out before payday/);
+  assert.match(p, /Explain, don't persuade/);
+  assert.match(p, /Calm and confident/);
+  assert.match(p, /puts you \$43\.00 below zero on Dec 3/, "a negative low point is said as below zero, not as a balance");
+  assert.doesNotMatch(p, /argue for|anxious/);
   assert.match(p, /Talk TO the user as "you"/);
   for (const c of cast) for (const k of keyNumbers(c.id, shortfall, ev("forecast_problem")))
     assert.equal(checkMessage(k.replace(/^[^:]+: /, ""), factsFor(c.id, shortfall, ev("forecast_problem"))).ok, true, `${c.id}: ${k}`);

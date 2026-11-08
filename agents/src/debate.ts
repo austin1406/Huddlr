@@ -8,7 +8,7 @@
 // budget and keeps the chat quiet. Calendar decisions (quiet hours, cap) use the simulated clock.
 import { localDate, type CharacterId, type FactsSnapshot, type FinanceEvent, type Plan, type ProposalService } from "../../contracts/src";
 import { celebration, celebrationTiming } from "./celebrate";
-import { character, config, speak } from "./character";
+import { character, config, speak, type SpeakResult } from "./character";
 import type { Queryable } from "./db";
 import type { Finance } from "./finance";
 import { buildDigest, decide, type Decision } from "./moderator";
@@ -65,6 +65,46 @@ async function proactiveSentToday(db: Queryable, phone: string, now: Date, timez
   return r.rows.filter((row) => localDate(new Date(row.created_sim_at), timezone) === today).length;
 }
 
+/**
+ * Which earlier message this one answers: one that opens by naming an earlier speaker ("Agreed with IRA on this one.",
+ * "Adding to Checking:"). Only the first sentence counts, and the name must be capitalized, so "your card balance"
+ * never threads under Card.
+ */
+export function answering(text: string, posted: Array<{ name: string; outboxId: number | null }>): number | null {
+  const first = text.split(/(?<=[.!?:])\s/)[0] ?? text;
+  if (!/\b(agree\w*|adding|add to|good point|building on|to add|point|like|as|with|on this)\b/i.test(first)) return null;
+  const hit = [...posted].reverse().find((p) => p.outboxId != null && new RegExp(`\\b${p.name}\\b`).test(first));
+  return hit?.outboxId ?? null;
+}
+
+/**
+ * Accounts speak in turn, each hearing what was said before it. A reply that answers an earlier account threads
+ * under that message (outbox.reply_to_outbox). The first speaker keeps the first-message budget; later ones get a
+ * fresh short budget so the whole round still fits well inside the plan budget.
+ */
+async function speakInTurn(
+  accounts: CharacterId[],
+  started: number,
+  say: (id: CharacterId, heard: Array<{ name: string; text: string }>, deadline: number) => Promise<SpeakResult>,
+  queue: (id: CharacterId, text: string, replyToOutbox: number | null) => Promise<number | null>,
+  onSpoken?: (id: CharacterId, r: SpeakResult) => void,
+): Promise<Array<{ name: string; text: string }>> {
+  const heard: Array<{ name: string; text: string }> = [];
+  const posted: Array<{ name: string; outboxId: number | null }> = [];
+  for (const [i, id] of accounts.entries()) {
+    const deadline = i === 0
+      ? started + config.debate.first_message_target_ms
+      : Math.min(Date.now() + config.debate.first_message_target_ms, started + config.debate.plan_target_ms - 2000);
+    const r = await say(id, [...heard], deadline);
+    const name = character(id).name;
+    const outboxId = await queue(id, r.text, answering(r.text, posted));
+    heard.push({ name, text: r.text });
+    posted.push({ name, outboxId });
+    onSpoken?.(id, r);
+  }
+  return heard;
+}
+
 /** Did the crew react to a shortfall in the last 7 simulated days? Then money into Checking is a rescue worth cheering. */
 async function hadRecentShortfall(db: Queryable, phone: string, now: Date): Promise<boolean> {
   const r = await db.query(
@@ -76,8 +116,8 @@ async function hadRecentShortfall(db: Queryable, phone: string, now: Date): Prom
 
 const situation = (id: CharacterId, event: FinanceEvent) =>
   id === "coach"
-    ? `The accounts just reacted to this: ${event.type}. Settle it with the plan.`
-    : `This just happened: ${event.type} ${JSON.stringify(event.data)}. React in character from your account's point of view. Disagree with the others if your account would.`;
+    ? `The accounts just explained what this means for them: ${event.type}. Close with the plan.`
+    : `This just happened: ${event.type} ${JSON.stringify(event.data)}. Explain what it means for the user from your account's side, with one number. If you see it differently from another account, say so briefly and calmly.`;
 
 export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<DebateResult> {
   const { db, finance, proposals, userPhone } = deps;
@@ -126,10 +166,10 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
   const priority = decision.priority;
   const accounts = decision.speakers.filter((s) => s !== "coach");
   const withCoach = decision.speakers.includes("coach");
-  const queue = (speaker: CharacterId, text: string, proposalId: number | null = null) =>
+  const queue = (speaker: CharacterId, text: string, proposalId: number | null = null, replyToOutbox: number | null = null) =>
     queueOutbox(db, {
       idempotency_key: `evt:${event.id}:${speaker}`, user_phone: userPhone, speaker, text, thread_key: `evt:${event.id}`,
-      event_id: event.id, proposal_id: proposalId, priority, created_sim_at: now.toISOString(),
+      event_id: event.id, proposal_id: proposalId, reply_to_outbox: replyToOutbox, priority, created_sim_at: now.toISOString(),
     });
 
   // The Coach's plan and proposal start now, in parallel with the accounts. Its line waits for the accounts,
@@ -150,17 +190,14 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
       })()
     : null;
 
-  // Accounts: queue each one the moment it passes the checker.
-  const heard: Array<{ name: string; text: string }> = [];
-  await Promise.all(
-    accounts.map(async (id) => {
-      const r = await speak(id, facts, situation(id, event), { event, model: deps.model, deadline: started + config.debate.first_message_target_ms });
-      await queue(id, r.text);
-      heard.push({ name: character(id).name, text: r.text });
+  // Accounts, one after another so each hears the others; each is queued the moment it passes the checker.
+  const heard = await speakInTurn(accounts, started,
+    (id, heardSoFar, deadline) => speak(id, facts, situation(id, event), { event, model: deps.model, deadline, heard: heardSoFar }),
+    (id, text, replyToOutbox) => queue(id, text, null, replyToOutbox),
+    (id, r) => {
       result.firstMessageMs ??= Date.now() - started;
       result.messages.push({ speaker: id, source: r.source, ms: r.ms });
-    }),
-  );
+    });
 
   if (coachPrep) {
     const { plan, ask, proposalId } = await coachPrep;
@@ -227,29 +264,39 @@ export async function runWindfall(
     if (proposalId != null) await scheduleProposalFollowUps(db, { userPhone, proposalId, now, emergency: false });
   }
 
-  const queue = (speaker: CharacterId, text: string, pid: number | null = null) =>
+  const queue = (speaker: CharacterId, text: string, pid: number | null = null, replyToOutbox: number | null = null, key: string = speaker) =>
     queueOutbox(db, {
-      idempotency_key: `inbound:${ask.inboundId}:${speaker}`, user_phone: userPhone, speaker, text, reply_to: ask.inboundId,
-      thread_key: `inbound:${ask.inboundId}`, proposal_id: pid, priority: 1, created_sim_at: now.toISOString(),
+      idempotency_key: `inbound:${ask.inboundId}:${key}`, user_phone: userPhone, speaker, text, reply_to: ask.inboundId,
+      reply_to_outbox: replyToOutbox, thread_key: `inbound:${ask.inboundId}`, proposal_id: pid, priority: 1, created_sim_at: now.toISOString(),
     });
-  const extraSources = [[ask.amount, keep]];
-  const heard: Array<{ name: string; text: string }> = [];
+
+  // 1. The Coach answers the question first and says who's about to speak.
+  const names = accounts.map((id) => character(id).name);
+  const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  await queue("coach", `Good question. ${who} weigh${names.length > 1 ? "" : "s"} in, then my plan.`, null, null, "coach-open");
+
+  // 2. Each account explains what the money would mean on its side, in turn, and can answer the others.
+  const extraSources = [[ask.amount, keep], ...(plan ? [plan] : [])];
   const money = `The ${usd(ask.amount)} is new money that just landed in Checking (it is not coming out of Savings).`;
-  await Promise.all(
-    accounts.map(async (id) => {
-      const stance = id === "checking" && keep > 0
-        ? `Argue that ${usd(keep)} of it should stay in Checking so the balance doesn't go short before payday.`
-        : `Make the case for what your account would do with it, in character. Disagree with the others if your account would.`;
-      const r = await speak(id, facts, `The user texted: "${ask.text}". ${money} ${stance}`, {
-        event, model: deps.model, deadline: started + config.debate.first_message_target_ms, extraSources,
-      });
-      await queue(id, r.text);
-      heard.push({ name: character(id).name, text: r.text });
-    }),
-  );
+  const planNote = (id: CharacterId) => {
+    const line = plan?.lines.find((l) => l.destination === id && l.amount > 0);
+    if (!line) return "";
+    const saved = Number((line.reasonNumbers as Record<string, unknown> | undefined)?.monthlyInterestSaved);
+    return id === "checking"
+      ? ` The plan keeps ${usd(line.amount)} of it in Checking so the balance doesn't go short before payday.`
+      : ` The plan sends ${usd(line.amount)} to ${character(id).name}${saved > 0 ? `, which saves ${usd(saved)} a month in interest` : ""}.`;
+  };
+  const heard = await speakInTurn(accounts, started,
+    (id, heardSoFar, deadline) =>
+      speak(id, facts, `The user texted: "${ask.text}". ${money}${planNote(id)} Explain what this money would mean on your side, with one number.`, {
+        event, model: deps.model, deadline, extraSources, heard: heardSoFar,
+      }),
+    (id, text, replyToOutbox) => queue(id, text, null, replyToOutbox));
+
+  // 3. The Coach closes with the plan and the YES.
   let line: { text: string };
   if (proposalId != null)
-    line = await speak("coach", facts, `The accounts just argued about the user's ${usd(ask.amount)}. ${money} The plan: ${split}. Explain that split in plain words (say where each part goes and why), then give the YES line.`, {
+    line = await speak("coach", facts, `The accounts just explained their side of the user's ${usd(ask.amount)}. ${money} The plan: ${split}. Explain that split in plain words, naming each part with its own amount exactly as written here (no other amounts, no "remaining"), and why, then give the YES line.`, {
       event, plan: coachPlan, ask: proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
     });
   else if (plan && !main && keep > 0)
