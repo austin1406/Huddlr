@@ -109,6 +109,7 @@
       <div class="chip" id="demomode" hidden>demo mode</div>
       <div class="chip" id="queue">queue —</div>
       <div class="chip" id="source">—</div>
+      <a class="chip" href="#" onclick="openHuddle(event)" style="color:var(--text,#fff);text-decoration:none">open Huddle ↗</a>
     </header>
 
     <section class="panel" id="controlpanel">
@@ -423,6 +424,15 @@ async function tick() {
 }
 tick();
 setInterval(tick, 2500);
+</script>
+<script>
+// Opens the user's Huddle page (a private, expiring link) in a new tab.
+async function openHuddle(e) {
+  e.preventDefault();
+  const w = window.open("", "_blank");
+  try { const r = await fetch("/api/huddle-link"); const j = await r.json(); if (j.url) w.location = j.url; else { w.close(); alert(j.error || "no link"); } }
+  catch { w.close(); }
+}
 </script>
 </body>
 </html>

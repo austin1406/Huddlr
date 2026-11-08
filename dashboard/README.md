@@ -37,3 +37,35 @@ Env (shared `/opt/huddlr/.env`): `DATABASE_URL`, `FINANCE_URL`, `HUDDLR_SECRET`,
 | **hide** | Collapses the panel for a clean projector view (remembered per browser) |
 
 The buttons call `POST /api/control/:action` on the dashboard (same login), which calls P1's `/admin/*` and P2's `/agents/reset` **on localhost** with the shared secret. The secret never reaches the browser, and `/admin/*` is not public (Caddy returns 404).
+
+## The Huddle (the user's own page)
+
+`/me/<token>` is a page for the **user**, not the team: their accounts as a group of people.
+Each one shows their balance, a face (happy / okay / worried from the real health status) and one plain sentence
+built from P1's numbers (no AI, so every number is exact). Coach sits on top with the one next move.
+
+- **Try a decision**: buy something, move money to Savings, pay down the card, add to the IRA, or lose your paycheck.
+  Everyone says what it does to them (before → after) and Coach gives a verdict. Buying and losing income use P1's
+  `/tools/what_if`; moving money is simple math on the same snapshot. Nothing moves real (or simulated) money.
+- **Tap a person** for their details, what's coming up, and a "Text them" button that opens iMessage to the agent number.
+- **Next 6 weeks**: Checking's forecast with paydays and bills marked by who they belong to.
+
+The link is private and expires (7 days by default). No dashboard password needed: the token is signed with `HUDDLR_SECRET`.
+
+Get a link:
+
+```bash
+# on the server
+cd /opt/huddlr/dashboard && npm run link              # for DEMO_USER_PHONE
+npm run link -- +15551234567 24                       # another phone, valid 24 hours
+```
+
+From code (P2, when someone texts "how am I doing?"):
+
+```
+POST http://localhost:3001/me-link
+x-huddlr-secret: <HUDDLR_SECRET>
+{ "phone": "+15551234567" }          ->  { "url": "https://…/me/…" }
+```
+
+On the dashboard, the **open Huddle ↗** chip in the header opens it for the demo user.
