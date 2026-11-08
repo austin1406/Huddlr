@@ -12,6 +12,7 @@ import { handleChat } from "./chat";
 import { migrate, pool, readClock, type Queryable } from "./db";
 import { maybeSendDigest, pollEvents, runOptions, runWindfall, type DebateDeps } from "./debate";
 import { maybeWelcome } from "./welcome";
+import { huddleLinkClient, replyWithHuddleLink } from "./huddle";
 import { devRoutes } from "./dev";
 import { runFollowUps } from "./followups";
 import { financeClient } from "./finance";
@@ -34,6 +35,8 @@ const env = {
   eventsPollMs: Number(process.env.AGENTS_EVENTS_POLL_MS || (local ? 2000 : 5000)),
   /** P1's finance service. On the VM it is localhost:4000; FINANCE_URL overrides. */
   financeUrl: process.env.FINANCE_URL || `http://localhost:${process.env.FINANCE_PORT || 4000}`,
+  /** P3's dashboard service, which makes Huddle links (POST /me-link). */
+  dashboardUrl: process.env.DASHBOARD_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3001}`,
 };
 
 let db: Queryable & { exec?: (sql: string) => Promise<unknown> };
@@ -59,6 +62,7 @@ const proposals = makeProposalService(db, now);
 const finance = financeClient(env.financeUrl, env.secret);
 const debate: DebateDeps = { db, finance, proposals, userPhone: env.demoUserPhone, clock };
 // Photo bytes: P3's /photon/attachments/:id in production; locally the "attachment id" is a file path (/agents/dev/photo).
+const huddleLink = huddleLinkClient(env.dashboardUrl, env.secret);
 const fetchImage = local ? fileImageFetcher : httpImageFetcher(process.env.PHOTON_URL || process.env.PUBLIC_BASE_URL || "http://localhost:3000", env.secret);
 
 const app = createApp({ db, proposals, secret: local ? "" : env.secret, demoUserPhone: env.demoUserPhone, now });
@@ -89,7 +93,8 @@ every(env.pollMs, "inbound", async () => {
   for (const row of r.rows) {
     const at = await now();
     // A phone's first text ever: the Coach introduces the crew before answering.
-    if (await maybeWelcome(db, { id: Number(row.id), user_phone: row.user_phone }, at)) console.log(`[agents] text ${row.id}: welcomed ${row.user_phone}`);
+    const welcomed = await maybeWelcome(db, { id: Number(row.id), user_phone: row.user_phone }, at, huddleLink);
+    if (welcomed) console.log(`[agents] text ${row.id}: welcomed ${row.user_phone}`);
     // A photo with no text: read the item and price, then can_i_afford.
     if (row.attachment_ids?.length && !row.text?.trim()) {
       const p = await handlePhoto(
@@ -101,7 +106,11 @@ every(env.pollMs, "inbound", async () => {
       continue;
     }
     const result = await handleInbound(db, proposals, { ...row, id: Number(row.id) }, at);
-    if (result.kind === "chat") {
+    if (result.kind === "huddle_link") {
+      // The welcome just carried a link; a second one would cancel it.
+      const sent = welcomed ? "in welcome" : await replyWithHuddleLink(db, huddleLink, { id: Number(row.id), user_phone: row.user_phone }, at);
+      console.log(`[agents] text ${row.id}: huddle link ${sent}`);
+    } else if (result.kind === "chat") {
       const chat = await handleChat(
         {
           db, facts: () => finance.facts(), userPhone: row.user_phone, finance, proposals,
