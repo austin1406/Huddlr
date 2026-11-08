@@ -8,6 +8,7 @@
 // budget and keeps the chat quiet. Calendar decisions (quiet hours, cap) use the simulated clock.
 import { localDate, type CharacterId, type FactsSnapshot, type FinanceEvent, type Plan, type ProposalService } from "../../contracts/src";
 import { celebration, celebrationTiming } from "./celebrate";
+import { describePriorities, fromFor, leadWith, loadPriorities, pickLine, type Priorities } from "./priorities";
 import { character, config, speak, type SpeakResult } from "./character";
 import type { Queryable } from "./db";
 import type { Finance } from "./finance";
@@ -46,12 +47,16 @@ export function planAmount(event: FinanceEvent, facts: FactsSnapshot): number | 
   return null;
 }
 
-/** The first plan line becomes the one transfer the user is asked to approve. Money into Checking comes from Savings; everything else from Checking. */
-export function proposalFromPlan(plan: Plan): { from: "checking" | "savings"; to: "checking" | "savings" | "card" | "car_loan" | "ira"; amount: number; actionText: string } | null {
-  const line = plan.lines.find((l) => !String(l.destination).startsWith("goal:") && l.amount > 0);
+/**
+ * The one transfer the user is asked to approve: a shortfall line if there is one (safety first), else the line the
+ * user ranks highest (priorities), else P1's first line. A bonus is already in Checking, so for one (`windfall`)
+ * Checking lines are "keep" lines and the money comes from Checking; otherwise a Checking top-up comes from Savings.
+ */
+export function proposalFromPlan(plan: Plan, priorities: Priorities | null = null, opts: { windfall?: boolean } = {}): { from: "checking" | "savings"; to: "checking" | "savings" | "card" | "car_loan" | "ira"; amount: number; actionText: string } | null {
+  const line = pickLine(plan, priorities, opts);
   if (!line) return null;
   const to = line.destination as "checking" | "savings" | "card" | "car_loan" | "ira";
-  const from = to === "checking" ? "savings" : "checking";
+  const from = fromFor(line, opts.windfall ?? false) as "checking" | "savings";
   return { from, to, amount: line.amount, actionText: `Move ${usd(line.amount)} from ${ACCOUNT_LABEL[from]} to ${ACCOUNT_LABEL[to]}` };
 }
 
@@ -177,8 +182,11 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
   const coachPrep = withCoach
     ? (async () => {
         const amount = planAmount(event, facts);
-        const plan = amount ? await finance.plan(amount).catch(() => null) : null;
-        const ask = plan ? proposalFromPlan(plan) : null;
+        const prefs = await loadPriorities(db, userPhone);
+        const raw = amount ? await finance.plan(amount, { priorities: prefs }).catch(() => null) : null;
+        const ask = raw ? proposalFromPlan(raw, prefs) : null;
+        // The Coach sides with the line the YES moves (its "who is right" rule follows the first line).
+        const plan = raw ? leadWith(raw, pickLine(raw, prefs)) : null;
         let proposalId: number | null = null;
         if (plan && ask) {
           const created = await proposals.create({ userPhone, plan, ...ask, sourceEventId: event.id });
@@ -234,13 +242,18 @@ export async function runWindfall(
     data: { amount: ask.amount, label: ask.label },
   };
 
-  const plan = await finance.plan(ask.amount).catch(() => null);
+  const prefs = await loadPriorities(db, userPhone);
+  const plan = await finance.plan(ask.amount, { priorities: prefs }).catch(() => null);
   // The bonus is already in Checking. A Checking line in P1's plan means "keep this much there" (it covers a gap),
-  // not a transfer. The one thing to say YES to is the first line that moves money OUT of Checking.
+  // not a transfer. The one thing to say YES to is the line that moves money OUT of Checking that the user ranks
+  // highest (their priorities), else P1's first one.
   const keepLines = plan?.lines.filter((l) => l.destination === "checking" && l.amount > 0) ?? [];
-  const moves = plan?.lines.filter((l) => l.destination !== "checking" && !String(l.destination).startsWith("goal:") && l.amount > 0) ?? [];
+  const main = plan ? pickLine(plan, prefs, { windfall: true }) : null;
+  const moves = [
+    ...(main ? [main] : []),
+    ...(plan?.lines.filter((l) => l !== main && l.destination !== "checking" && !String(l.destination).startsWith("goal:") && l.amount > 0) ?? []),
+  ];
   const keep = keepLines.reduce((s, l) => s + l.amount, 0);
-  const main = moves[0];
   const mainTo = main ? (String(main.destination) as "savings" | "card" | "car_loan" | "ira") : null;
   const proposal = main && mainTo
     ? { from: "checking" as const, to: mainTo, amount: main.amount, actionText: `Move ${usd(main.amount)} from Checking to ${ACCOUNT_LABEL[mainTo]}` }
@@ -296,7 +309,7 @@ export async function runWindfall(
   // 3. The Coach closes with the plan and the YES.
   let line: { text: string };
   if (proposalId != null)
-    line = await speak("coach", facts, `The accounts just explained their side of the user's ${usd(ask.amount)}. ${money} The plan: ${split}. Explain that split in plain words, naming each part with its own amount exactly as written here (no other amounts, no "remaining"), and why, then give the YES line.`, {
+    line = await speak("coach", facts, `The accounts just explained their side of the user's ${usd(ask.amount)}. ${money}${describePriorities(prefs) ? ` The user told us their priorities: ${describePriorities(prefs)}; the YES below follows them, so say so in a few words.` : ""} The plan: ${split}. Explain that split in plain words, naming each part with its own amount exactly as written here (no other amounts, no "remaining"), and why, then give the YES line.`, {
       event, plan: coachPlan, ask: proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
     });
   else if (plan && !main && keep > 0)

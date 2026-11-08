@@ -67,6 +67,17 @@ finance isn't on localhost:4000).
 - "Can I afford a $40 dinner?" by text also goes straight to `can_i_afford`, so the answer is computed, not generated.
 - Locally: `curl -XPOST localhost:5055/agents/dev/photo -d '{"path":"test/fixtures/price-tag.png"}'`.
 
+## Priorities and the account summary
+
+- "Prioritize my IRA over savings", "pay off the card first", "card first, then savings", "savings can wait",
+  "don't touch my savings", "reset my priorities": saved as `pref:priorities` in memory_facts and confirmed by the
+  Coach. The YES of every plan then moves the user's top-ranked part first (a shortfall is always covered first). A
+  plan already waiting is re-pointed ("I've updated the plan. Reply YES to: …"), and the old YES can't approve it.
+- Priorities are sent to P1's `get_plan` as an optional `priorities: { first, last }`. The planner ignores it until it
+  supports it; until then priorities change which part is the YES, not the amounts.
+- "Give me a summary of my account" / "where do I stand": every account in one Coach message, built in code, plus
+  priorities and any plan waiting for YES.
+
 ## How a multi-character reply reads
 
 1. The Coach answers the question first (reply to the user's text) and says who's speaking: "Good question. Card and

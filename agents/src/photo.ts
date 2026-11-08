@@ -34,7 +34,7 @@ export function affordText(r: CanIAffordResponse, item?: string | null): string 
   const low = r.lowestBalanceAfter;
   if (r.verdict === "yes") return `Yes, ${what} fits. Your lowest balance before payday would still be ${usd(low.balance)} on ${day(low.date)}.`;
   if (r.verdict === "tight")
-    return `Tight: ${what} keeps you above zero, but your lowest balance would be ${usd(low.balance)} on ${day(low.date)}, under your ${usd(r.cushion)} cushion.`;
+    return `Tight: ${what} keeps you above zero, but your lowest balance would be ${usd(low.balance)} on ${day(low.date)}, under the ${usd(r.cushion)} buffer you like to keep in Checking.`;
   return `Not right now: ${what} would put you ${usd(low.balance)} in the red${r.firstNegativeDateAfter ? ` on ${day(r.firstNegativeDateAfter)}` : ""}. Want the crew to find room?`;
 }
 

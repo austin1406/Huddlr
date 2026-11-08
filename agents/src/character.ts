@@ -60,6 +60,27 @@ export function cardMonthlyInterest(facts: FactsSnapshot): number | null {
 }
 
 /**
+ * The savings cushion in words a person can picture: how long savings would cover the must-pay bills if income
+ * stopped. "about 2 weeks" under a month, "about 1.5 months" after that. Computed in code (so the checker accepts
+ * the numbers) from P1's runway indicator: savings / monthly essential bills.
+ */
+export function cushionWords(facts: FactsSnapshot, savingsBalance?: number): { span: string; weeks: number | null; months: number; monthlyBills: number; sentence: string } | null {
+  const runway = indicator(facts, "runway");
+  const monthlyBills = Number(runway?.inputs.monthlyEssentials ?? 0);
+  const savings = savingsBalance ?? account(facts, "savings")?.balance;
+  if (!runway || !monthlyBills || savings == null) return null;
+  const months = round2(savings / monthlyBills);
+  const weeks = months < 1 ? Math.round((months * 52) / 12) : null;
+  const span = months < 1
+    ? weeks! < 1 ? "less than a week" : `about ${weeks} week${weeks === 1 ? "" : "s"}`
+    : `about ${Math.round(months * 10) / 10} month${Math.round(months * 10) / 10 === 1 ? "" : "s"}`;
+  return {
+    span, weeks, months, monthlyBills,
+    sentence: `If your income stopped, your ${fmtUsd(savings)} in savings would cover ${span} of must-pay bills (${fmtUsd(monthlyBills)} a month for things like rent and utilities).`,
+  };
+}
+
+/**
  * Only the slice of facts this character talks about, so the model has less to mix up.
  * `event` is the event being reacted to (defaults to the most recent one).
  */
@@ -73,16 +94,17 @@ export function factsFor(id: CharacterId, facts: FactsSnapshot, event?: FinanceE
       firstNegativeDate: f.firstNegativeDate,
       nextPayday: f.nextPayday,
       safeToSpendUntilPayday: f.safeToSpendUntilPayday,
-      cushion: f.cushion,
+      /** The buffer the user likes to keep in Checking (say "buffer", not "cushion": the cushion is Savings'). */
+      buffer: f.cushion,
       upcomingBills: facts.upcomingBills,
       shortfall: facts.shortfall,
       lowestBreakdown: lowestBreakdown(facts),
     },
-    savings: { account: account(facts, "savings"), runway: indicator(facts, "runway"), savingsRate: indicator(facts, "savings_rate") },
+    savings: { account: account(facts, "savings"), runway: indicator(facts, "runway"), savingsRate: indicator(facts, "savings_rate"), cushion: cushionWords(facts) },
     card: { account: account(facts, "card"), utilization: indicator(facts, "credit_utilization"), monthlyInterest: cardMonthlyInterest(facts) },
     car_loan: { account: account(facts, "car_loan"), billReliability: indicator(facts, "bill_reliability") },
     ira: { account: account(facts, "ira"), retirementOnTrack: indicator(facts, "retirement_on_track") },
-    coach: { ...facts },
+    coach: { ...facts, cushion: cushionWords(facts) },
   };
   return { ...slice[id], event: latestEvent, pendingProposals: facts.pendingProposals };
 }
@@ -120,7 +142,11 @@ export function keyNumbers(id: CharacterId, facts: FactsSnapshot, event?: Financ
       }
       break;
     case "savings":
-      out.push(`your balance: ${fmtUsd(a("savings")!.balance)}`, `cushion: ${ind("runway")!.value} months of essentials`);
+      out.push(`your balance: ${fmtUsd(a("savings")!.balance)}`);
+      {
+        const c = cushionWords(facts);
+        if (c) out.push(`what your savings means in plain words (put it in your own words; never "months of essentials" or "runway"): ${c.sentence}`);
+      }
       break;
     case "card": {
       const c = a("card")!;
@@ -173,6 +199,7 @@ export function buildPrompt(
       ? [`- If you genuinely agree with or build on what one of the others said, you may open by saying so by name, professionally (like "Agreed with IRA on this one." or "Adding to Checking:"). If you're making your own separate point, skip that and just make it.`]
       : []),
     `- Calm and confident. Never say you're nervous, worried or scared, and never tell the user to "be careful". No slang.`,
+    `- Sound like a friendly text from someone who's good with money: everyday words, short sentences. No jargon: say "must-pay bills" not "essentials", "how long your savings would last" not "runway", "the interest rate (APR)" the first time you mention APR.`,
     `- Copy numbers and dates exactly as written in KEY NUMBERS or FACTS. Never add, subtract, round, or invent a number.`,
     `- Plain words, no emoji, no "${c.name}:" prefix, no hashtags.`,
     `- You can't move money and never ask for passwords, codes, or account numbers. No specific investment picks.`,
@@ -212,7 +239,7 @@ const destName = (d: string) => DEST[d] ?? d.replace(/^goal:/, "your ").replace(
 const REASON: Record<string, string> = {
   cover_shortfall: "so Checking doesn't go negative",
   pay_high_interest_debt: "to cut the highest interest first",
-  build_emergency_fund: "to grow your cushion",
+  build_emergency_fund: "so your savings covers more weeks of bills",
   capture_employer_match: "to grab the free employer match",
   fund_goal: "toward your goal",
   extra_retirement: "for retirement",
@@ -239,7 +266,7 @@ export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | nu
         ? `Checking is at ${usd(a("checking").balance)}, and the forecast dips below zero before payday.`
         : `I'm at ${usd(a("checking").balance)}; safe to spend until payday is ${usd(facts.forecast.safeToSpendUntilPayday)}.`;
     case "savings":
-      return `I'm holding ${usd(a("savings").balance)}, about ${indicator(facts, "runway")!.value} months of cushion.`;
+      return cushionWords(facts)?.sentence ?? `Your savings is at ${usd(a("savings").balance)}.`;
     case "car_loan":
       return `The ${usd(a("car_loan").monthlyPayment ?? 0)} car payment comes out every month, with ${usd(a("car_loan").balance)} still owed.`;
     case "ira":
@@ -248,6 +275,42 @@ export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | nu
         : `Your IRA is at ${usd(a("ira").balance)}.`;
     case "coach":
       return `Here's where things stand. Ask me about any account, or @mention one of them, and I'll walk you through it.`;
+  }
+}
+
+/** Plain-language fallback for "explain…" questions, built from facts. Used when Gemini's answer can't be sent. */
+export function explainTemplate(id: CharacterId, facts: FactsSnapshot): string {
+  const a = (x: Account["id"]) => account(facts, x);
+  const f = facts.forecast;
+  const day = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  switch (id) {
+    case "savings": {
+      const c = cushionWords(facts);
+      return `Think of savings as your backup if a paycheck didn't come. Right now it would pay your must-pay bills for ${c?.span ?? "a short while"}. A common first target is one month of those bills.`;
+    }
+    case "card": {
+      const card = a("card");
+      const interest = cardMonthlyInterest(facts);
+      return card?.aprPercent && interest
+        ? `APR is the yearly interest rate on what you owe. On your ${usd(card.balance)} balance at ${card.aprPercent}%, that's about ${usd(interest)} a month. Paying the balance down shrinks that charge.`
+        : `APR is the yearly interest rate the card charges on what you owe. Paying the balance down shrinks that charge.`;
+    }
+    case "checking":
+      return facts.shortfall
+        ? `A shortfall means Checking would dip below zero before payday. Right now you'd be short ${usd(facts.shortfall.amount)} on ${day(facts.shortfall.firstNegativeDate)}, and a ${usd(facts.shortfall.suggestedTransfer)} transfer fixes it.`
+        : `"Safe to spend" is what you can spend before payday on ${day(f.nextPayday)} and still keep your ${usd(f.cushion)} buffer in Checking. Right now that's ${usd(f.safeToSpendUntilPayday)}.`;
+    case "ira": {
+      const ira = a("ira");
+      return ira?.unclaimedMatchThisYear
+        ? `An employer match means your job adds money to your IRA when you put money in. You still have ${usd(ira.unclaimedMatchThisYear)} of that free money unclaimed this year.`
+        : `Your IRA is money set aside for retirement. It's at ${usd(ira?.balance ?? 0)} right now.`;
+    }
+    case "car_loan": {
+      const l = a("car_loan");
+      return `Your car loan has ${usd(l?.balance ?? 0)} still owed, paid down ${usd(l?.monthlyPayment ?? 0)} each month. Extra payments shorten the loan and cut the interest.`;
+    }
+    case "coach":
+      return `Here's the short version: each account watches one part of your money, and I turn what they say into one plan you can approve with YES. Ask about any word and I'll break it down.`;
   }
 }
 
@@ -321,6 +384,14 @@ export function styleProblem(id: CharacterId, text: string): string | null {
   return null;
 }
 
+/** An explanation that opens with the same sentence it's explaining isn't an explanation. */
+export function repeatProblem(text: string, avoid?: string[]): string | null {
+  if (!avoid?.length) return null;
+  const opening = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0].slice(0, 60);
+  const mine = opening(text);
+  return avoid.some((a) => a && opening(a) === mine) ? `Don't repeat your earlier message; say it a new, simpler way.` : null;
+}
+
 /**
  * Produce one grounded line for a character.
  * opts.model replaces Gemini in tests; opts.deadline is a real-clock ms timestamp (delivery timing, not calendar).
@@ -329,7 +400,12 @@ export async function speak(
   id: CharacterId,
   facts: FactsSnapshot,
   situation: string,
-  opts: { model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; plan?: Plan | null; ask?: string | null; heard?: Array<{ name: string; text: string }>; extraSources?: unknown[] } = {},
+  opts: {
+    model?: (prompt: string) => Promise<string>; deadline?: number; event?: FinanceEvent | null; plan?: Plan | null; ask?: string | null;
+    heard?: Array<{ name: string; text: string }>; extraSources?: unknown[];
+    /** Earlier messages this reply must not open the same way as (an "explain that" must rephrase, not repeat). */
+    avoidRepeating?: string[];
+  } = {},
 ): Promise<SpeakResult> {
   const started = Date.now();
   const cm = config.character_model;
@@ -356,7 +432,7 @@ export async function speak(
       const text = await model(prompt);
       // Checked against this character's own slice, not all 45 forecast days, so stray numbers can't sneak through.
       const check = checkMessage(text, ...sources);
-      const problem = check.ok ? (coachProblem(id, text, opts.plan, opts.ask, opts.heard) ?? styleProblem(id, text)) : null;
+      const problem = check.ok ? (coachProblem(id, text, opts.plan, opts.ask, opts.heard) ?? styleProblem(id, text) ?? repeatProblem(text, opts.avoidRepeating)) : null;
       attempts.push({ text, ...check, ...(problem ? { ok: false, error: problem } : {}) });
       if (check.ok && !problem && text) return { text, source, attempts, ms: Date.now() - started };
       prompt += problem

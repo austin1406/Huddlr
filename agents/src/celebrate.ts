@@ -7,7 +7,7 @@
 // works even when Gemini is rate-limited. Celebrations are friendly, not urgent: they respect quiet hours and the
 // daily cap like any other proactive message, and they never react to the same event twice.
 import { isQuietHours, type CharacterId, type FactsSnapshot, type FinanceEvent } from "../../contracts/src";
-import { config } from "./character";
+import { config, cushionWords } from "./character";
 
 export interface Cheer {
   speaker: CharacterId;
@@ -16,7 +16,6 @@ export interface Cheer {
 
 const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const balance = (facts: FactsSnapshot, id: string) => facts.accounts.find((a) => a.id === id)?.balance;
-const runway = (facts: FactsSnapshot) => facts.indicators.find((i) => i.id === "runway")?.value;
 
 /**
  * The celebration for this event, or null if it isn't one (then the normal debate runs).
@@ -30,10 +29,10 @@ export function celebration(event: FinanceEvent, facts: FactsSnapshot, recentSho
 
   switch (to) {
     case "savings": {
-      const months = runway(facts);
+      const c = cushionWords(facts);
       return {
         speaker: "savings",
-        text: `Yes! ${usd(amount)} just landed with me.${months != null ? ` That's ${months} months of essentials saved now.` : ""} Future you is breathing easier.`,
+        text: `Nice, ${usd(amount)} just landed in savings.${c ? ` You now have enough saved to cover ${c.span} of must-pay bills if your income stopped.` : ""} That's real breathing room.`,
       };
     }
     case "card": {

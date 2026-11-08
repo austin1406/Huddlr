@@ -1,7 +1,11 @@
 // A text that isn't an answer to a proposal: remember any goal or preference in it, then let the right
 // character answer (one speaker, grounded like everything else).
-import type { CharacterId, FactsSnapshot, Plan } from "../../contracts/src";
-import { lowestBreakdown, speak } from "./character";
+import type { CharacterId, FactsSnapshot, Plan, ProposalService } from "../../contracts/src";
+import { proposalFromPlan } from "./debate";
+import { scheduleProposalFollowUps } from "./followups";
+import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
+import { accountSummary, isSummaryQuestion } from "./summary";
+import { explainTemplate, lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
@@ -58,8 +62,8 @@ const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "
 
 /** The pending proposal, with its plan spelled out in words (built from the plan's own numbers). */
 async function pendingPlan(db: Queryable, phone: string) {
-  const r = await db.query<{ action_text: string; source_event_id: string | null; plan: Plan | string }>(
-    "SELECT action_text, source_event_id, plan FROM proposals WHERE user_phone = $1 AND status = 'pending' ORDER BY id DESC LIMIT 1",
+  const r = await db.query<{ action_text: string; source_event_id: string | null; plan: Plan | string; to_account: string }>(
+    "SELECT action_text, source_event_id, plan, to_account FROM proposals WHERE user_phone = $1 AND status = 'pending' ORDER BY id DESC LIMIT 1",
     [phone],
   );
   const row = r.rows[0];
@@ -74,8 +78,9 @@ async function pendingPlan(db: Queryable, phone: string) {
       return `${usd(l.amount)} to ${to} (${l.reasonCode.replace(/_/g, " ")})`;
     })
     .join("; ");
-  // For the Coach's "who is right" rule (it follows the first line): for a bonus, lead with where money moves.
-  const coachPlan = windfall ? { ...plan, lines: [...plan.lines.filter((l) => l.destination !== "checking"), ...plan.lines.filter((l) => l.destination === "checking")] } : plan;
+  // For the Coach's "who is right" rule (it follows the first line): lead with the line the YES moves.
+  const yesLine = plan.lines.find((l) => l.destination === row.to_account && l.amount > 0) ?? null;
+  const coachPlan = leadWith(plan, yesLine);
   return { actionText: row.action_text, source: row.source_event_id, plan, coachPlan, planAmount: plan.amount, split };
 }
 
@@ -91,8 +96,37 @@ async function recentConversation(db: Queryable, phone: string, inboundId: numbe
   // Who answered most recently: "where did I get 419 from?" is a question for them.
   const lastOut = [...rows].reverse().find((m) => m.direction === "out");
   const lastSpeaker = lastOut && (lastOut.speaker in ACCOUNT_NAMES || lastOut.speaker === "coach") ? (lastOut.speaker as CharacterId) : null;
-  return { lines, numbers, lastSpeaker };
+  return { lines, numbers, lastSpeaker, lastText: lastOut?.text ?? null };
 }
+
+/** "explain…", "what does APR mean", "what's utilization", "I don't get it", "in simple words". */
+export function isExplainRequest(text: string): boolean {
+  return /\b(explain|eli5|in simple (?:words|terms)|simpler|break (?:it|that) down|i don'?t (?:get|understand)|what (?:does|do) (?:\w+\s){0,4}mean|what(?:'s| is| are) (?:an? |the |my )?(?:apr|interest rate|utili[sz]ation|runway|cushion|buffer|employer match|match|shortfall|safe to spend|must-pay bills|essentials|ira|emergency fund|minimum payment))\b/i.test(text);
+}
+
+/** Who should explain a money word: the character it belongs to. */
+export function explainer(text: string): CharacterId | null {
+  const t = text.toLowerCase();
+  if (/\b(apr|interest|utili[sz]ation|credit|card|minimum payment)\b/.test(t)) return "card";
+  if (/\b(employer match|match|ira|retirement|401k)\b/.test(t)) return "ira";
+  if (/\b(cushion|runway|emergency fund|essentials|must-pay|savings)\b/.test(t)) return "savings";
+  if (/\b(shortfall|buffer|safe to spend|payday|lowest|checking|negative)\b/.test(t)) return "checking";
+  if (/\b(car loan|car payment|loan)\b/.test(t)) return "car_loan";
+  if (/\b(plan|yes|proposal)\b/.test(t)) return "coach";
+  return null;
+}
+
+/** Plain meanings the model can lean on, so "explain" answers are simple and right. */
+const GLOSSARY = [
+  `APR: the yearly interest rate on what you owe; each month the card charges about one twelfth of it on the balance.`,
+  `Credit utilization: how much of your card limit you're using; staying under 30% helps your credit score.`,
+  `Savings cushion: how long your savings would cover your must-pay bills if your income stopped.`,
+  `Buffer: the small amount you like to keep in Checking so it never hits zero.`,
+  `Employer match: your job adds money to your IRA when you put money in; any match you don't claim is free money left behind.`,
+  `Shortfall: Checking would dip below zero before your next paycheck.`,
+  `Safe to spend: what you can spend before payday and still keep your buffer.`,
+  `Must-pay bills: rent, utilities, phone, the car payment and the card minimum.`,
+].join(" ");
 
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
 export function pickResponder(text: string): CharacterId {
@@ -108,6 +142,8 @@ export function pickResponder(text: string): CharacterId {
 export async function handleChat(
   deps: {
     db: Queryable; facts: () => Promise<FactsSnapshot>; userPhone: string; model?: (p: string) => Promise<string>; finance?: Finance;
+    /** Re-points a waiting plan when the user states priorities. Without it, priorities are saved and confirmed only. */
+    proposals?: ProposalService;
     /** Runs the group debate for a windfall (debate.ts runWindfall). Without it, the question gets one answer. */
     windfall?: (ask: { inboundId: number; text: string; amount: number; label: string }, now: Date) => Promise<{ speakers: CharacterId[] }>;
   },
@@ -131,6 +167,40 @@ export async function handleChat(
   }
 
   const pending = await pendingPlan(deps.db, deps.userPhone);
+
+  // "Give me a summary of my account": every account in one message, built in code. No YES invite beyond
+  // naming the plan that's already waiting.
+  if (isSummaryQuestion(text) && (!parseMention(text) || parseMention(text)!.who === "coach")) {
+    const summary = accountSummary(await deps.facts(), await loadPriorities(deps.db, deps.userPhone), pending?.actionText ?? null);
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:summary`, speaker: "coach", text: summary });
+    return { learned: 0, responder: "coach" };
+  }
+
+  // "Prioritize my IRA over savings", "pay off the card first", "don't touch my savings": save it, confirm it, and
+  // re-point the plan that's waiting (if any) so its YES moves the user's top priority first.
+  const change = parsePriorities(parseMention(text)?.rest || text);
+  if (change) {
+    const merged = mergePriorities(await loadPriorities(deps.db, deps.userPhone), change);
+    await savePriorities(deps.db, deps.userPhone, merged, now);
+    let reply = priorityAck(change);
+    if (pending && deps.proposals && !change.clear) {
+      const windfallPlan = pending.source?.startsWith("chat_windfall_") ?? false;
+      const next = proposalFromPlan(pending.plan, merged, { windfall: windfallPlan });
+      const top = change.first?.[0];
+      const missing = top && !pending.plan.lines.some((l) => l.destination === top && l.amount > 0);
+      if (next && next.actionText !== pending.actionText) {
+        const created = await deps.proposals.create({ userPhone: deps.userPhone, plan: pending.plan, ...next, sourceEventId: pending.source });
+        if (created.proposal) await scheduleProposalFollowUps(deps.db, { userPhone: deps.userPhone, proposalId: Number(created.proposal.id), now, emergency: false });
+        reply += ` I've updated the plan. Reply YES to: ${next.actionText}.`;
+      } else if (missing) {
+        reply += ` The plan that's waiting doesn't put anything in ${NAMES[top]}; it goes first next time there's money to place. Still waiting on your YES: ${pending.actionText}.`;
+      } else {
+        reply += ` Your plan already starts there. Reply YES to: ${pending.actionText}.`;
+      }
+    }
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:priorities`, speaker: "coach", text: reply });
+    return { learned: 1, responder: "coach" };
+  }
 
   // "I got a $600 bonus, what should I do?" gets the whole crew: a debate and a plan to say YES to.
   // An @-mention means the user wants one voice, so it skips this. Asking again about the same bonus while its plan
@@ -158,14 +228,23 @@ export async function handleChat(
   const mention = parseMention(text);
   const recent = await recentConversation(deps.db, deps.userPhone, inbound.id);
   const followUp = !mention && (sameWindfall || isFollowUp(text));
+  // "Explain APR", "what does that mean", "in simple words": the character the word belongs to explains it simply,
+  // or whoever just spoke if it's about their last message.
+  const explain = isExplainRequest(mention?.rest || text);
   const responder: CharacterId = mention?.who
-    ?? (sameWindfall ? "coach" : followUp && recent.lastSpeaker ? recent.lastSpeaker : followUp && pending ? "coach" : pickResponder(text));
+    ?? (sameWindfall ? "coach"
+      : explain && explainer(text) ? explainer(text)!
+      : followUp && recent.lastSpeaker ? recent.lastSpeaker
+      : followUp && pending ? "coach"
+      : pickResponder(text));
   // The Coach explaining the waiting plan is held to the debate rules (exact YES line, nobody wrongly "right").
-  const explainingPlan = responder === "coach" && followUp && pending != null;
+  const explainingPlan = responder === "coach" && followUp && pending != null && (!explain || explainer(text) === "coach" || !explainer(text));
   const question = mention ? mention.rest || "How am I doing with you right now?" : text;
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
-  const ask = mention
+  const ask = explain && !explainingPlan
+    ? `The user asked: "${question}". Explain it in simple words, like you're texting a friend who's new to money: up to 3 short sentences, no jargon, and use one of their real numbers from KEY NUMBERS as the example. If it's about something said earlier in the conversation below, explain that, and don't repeat it word for word: say it a new, simpler way, like an everyday comparison. Plain meanings you can use: ${GLOSSARY}`
+    : mention
     ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
     : followUp && !explainingPlan
       ? `The user texted: "${question}". They're asking about the conversation below, most likely your last message. Explain plainly where its numbers come from, step by step, using your KEY NUMBERS (for Checking: the balance now, the bills before the low point, everyday spending, and the lowest point). If your last message was a "can I afford" answer, its lowest balance already has that purchase taken out: say the lowest point without it, then that the purchase takes it to the number you gave. If they mixed up two numbers, say which is which using ALL BALANCES. Answer the question; skip your usual pitch this time.`
@@ -183,6 +262,8 @@ export async function handleChat(
   ].join("\n");
   const r = await speak(responder, facts, `${ask}${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}${context ? `\n${context}` : ""}`, {
     model: deps.model,
+    // "What does that mean?" must rephrase the last message, not repeat it (code-enforced, one retry).
+    ...((explain || followUp) && recent.lastText ? { avoidRepeating: [recent.lastText] } : {}),
     // The Coach explaining the waiting plan is held to the same code-enforced rules as in a debate: the exact YES line,
     // and nobody is called "right" who didn't speak just now (no "Savings is right because…" out of nowhere).
     ...(explainingPlan && pending ? { plan: pending.coachPlan, ask: pending.actionText, heard: [] } : {}),
@@ -197,6 +278,8 @@ export async function handleChat(
       ...(responder === "checking" ? [lowestBreakdown(facts)] : []),
     ],
   });
-  await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: r.text });
+  // An "explain" whose Gemini answer couldn't be sent gets a plain explanation, not the character's usual line.
+  const text2 = explain && !explainingPlan && r.source === "template" ? explainTemplate(responder, facts) : r.text;
+  await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: text2 });
   return { learned: 0, responder };
 }
