@@ -41,8 +41,8 @@ test("bottom line with a plan waiting: the one action, why, and the rest as opti
   const facts = await (await finance()).facts();
   const text = bottomLine(facts, { actionText: "Move $150.00 from Checking to IRA", to: "ira", plan: paycheckPlan, windfall: false });
   assert.equal(text,
-    "Bottom line: move $150.00 from Checking to IRA in your bank app. That grabs your employer match: free money your job adds when you put money in. " +
-    "The plan also suggests $1,161.50 to your card whenever you're ready. I'll check it off when I see the transfer.");
+    "Bottom line: move $150.00 from Checking to IRA and $1,161.50 from Checking to Card in your bank app. " +
+    "That grabs your employer match: free money your job adds when you put money in. I'll check it off when I see the transfer.");
 });
 
 test("bottom line with nothing waiting: says whether anything needs doing", async () => {
@@ -63,7 +63,7 @@ test("the screenshot: 'so what should i do' with a plan waiting gets the bottom 
   const r = await handleChat({ db, facts: () => f.facts(), userPhone: PHONE, finance: f, proposals, model: async () => "unused" }, row, now);
   assert.equal(r.responder, "coach");
   const out = (await db.query<{ text: string }>("SELECT text FROM outbox ORDER BY id DESC LIMIT 1")).rows[0].text;
-  assert.match(out, /^Bottom line: move \$150\.00 from Checking to IRA in your bank app\./);
+  assert.match(out, /^Bottom line: move \$150\.00 from Checking to IRA and \$1,161\.50 from Checking to Card in your bank app\./, "every move, not just the first");
   assert.doesNotMatch(out, /reply yes/i, "the Coach can't move money, so it never asks for a YES");
   assert.equal((await proposals.getPending(PHONE))?.status, "pending", "answering never approves");
 });
@@ -99,8 +99,10 @@ test("bill due soon (no plan): accounts explain, the Coach closes with a bottom 
 });
 
 test("the Coach's pre-written plan line leads with the bottom line too", () => {
-  const t = planTemplate(paycheckPlan, "Move $150.00 from Checking to IRA");
-  assert.match(t, /^Bottom line: \$150\.00 to IRA to grab the free employer match\. The plan also suggests \$1,161\.50 to Card for later\. Move \$150\.00 from Checking to IRA in your bank app\.$/);
+  // Given only the lead move, the rest is still listed; given every move, nothing is repeated.
+  assert.match(planTemplate(paycheckPlan, "Move $150.00 from Checking to IRA"), /The plan also suggests \$1,161\.50 to Card for later\. Move \$150\.00 from Checking to IRA in your bank app\.$/);
+  const t = planTemplate(paycheckPlan, "Move $150.00 from Checking to IRA and $1,161.50 from Checking to Card");
+  assert.match(t, /^Bottom line: \$150\.00 to IRA to grab the free employer match\. Move \$150\.00 from Checking to IRA and \$1,161\.50 from Checking to Card in your bank app\.$/);
 });
 
 test("'so what should i do' with the roundtable: every account in the plan gives its option, then the Coach's bottom line", async () => {
@@ -123,7 +125,7 @@ test("'so what should i do' with the roundtable: every account in the plan gives
   assert.deepEqual(rows.map((x) => x.speaker), ["coach", "ira", "card", "savings", "coach"]);
   assert.equal(rows[0].text, "Good question. IRA, Card and Savings each give an option, then my bottom line.");
   assert.match(rows[1].text, /^Option: put \$150\.00 into the IRA/);
-  assert.match(rows.at(-1)!.text, /^Bottom line: move \$150\.00 from Checking to IRA in your bank app\./);
+  assert.match(rows.at(-1)!.text, /^Bottom line: move \$150\.00 from Checking to IRA and \$1,161\.50 from Checking to Card in your bank app\./);
   assert.ok(rows.every((x) => Number(x.reply_to) === id), "all threaded under the question");
   assert.match(prompts[0], /The plan sends \$150\.00 to IRA/);
   assert.match(prompts[0], /Give the user your option/);

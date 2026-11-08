@@ -28,6 +28,16 @@ const shortPlan: Plan = {
   lines: [{ destination: "checking", amount: 143, reasonCode: "cover_shortfall", reasonNumbers: {} }, ...phonePlan.lines.slice(1)],
 };
 
+test("the Coach lists every move, lead first, with the right 'from' account", async () => {
+  const { allMovesText } = await import("../src/priorities");
+  assert.equal(allMovesText(phonePlan, phonePlan.lines[0]), "Move $150.00 from Checking to IRA and $450.00 from Checking to Card");
+  assert.equal(allMovesText(phonePlan, phonePlan.lines[1]), "Move $450.00 from Checking to Card and $150.00 from Checking to IRA", "lead move first");
+  // A shortfall top-up comes from Savings; everything else from Checking.
+  assert.equal(allMovesText(shortPlan, shortPlan.lines[0]), "Move $143.00 from Savings to Checking and $450.00 from Checking to Card");
+  // For a bonus, money that stays in Checking isn't a move.
+  assert.equal(allMovesText(shortPlan, null, { windfall: true }), "Move $450.00 from Checking to Card");
+});
+
 test("parses the ways people say what matters to them", () => {
   assert.deepEqual(parsePriorities("i wanna prioritize my ira over savings right now"), { first: ["ira"], last: ["savings"] });
   assert.deepEqual(parsePriorities("pay off the card first"), { first: ["card"] });

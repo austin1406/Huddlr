@@ -164,3 +164,20 @@ export function leadWith(plan: Plan, line: PlanLine | null): Plan {
 export function fromFor(line: PlanLine, windfall: boolean): AccountId {
   return windfall || line.destination !== "checking" ? "checking" : "savings";
 }
+
+const LABEL: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Loan", ira: "IRA" };
+const money = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Every move in a plan, in one sentence, the lead line first: "Move $150.00 from Checking to IRA and $450.00 from
+ * Checking to Card". The user makes all of them in their bank app (the Coach can't move money), so the Coach lists
+ * them all instead of only the first. Goal lines are skipped; for a bonus, Checking lines are "keep", not moves.
+ */
+export function allMovesText(plan: Plan, lead: PlanLine | null, opts: { windfall?: boolean } = {}): string | null {
+  const moves = plan.lines.filter((l) => l.amount > 0 && !String(l.destination).startsWith("goal:") && !(opts.windfall && l.destination === "checking"));
+  const ordered = lead && moves.includes(lead) ? [lead, ...moves.filter((l) => l !== lead)] : moves;
+  if (!ordered.length) return null;
+  const parts = ordered.map((l) => `${money(l.amount)} from ${LABEL[fromFor(l, opts.windfall ?? false)]} to ${LABEL[String(l.destination)] ?? String(l.destination)}`);
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
+  return `Move ${list}`;
+}
