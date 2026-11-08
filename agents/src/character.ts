@@ -1,6 +1,7 @@
 // One character turn: prompt -> Gemini -> number checker -> (retry once if time allows) -> template fallback.
 import { readFileSync } from "node:fs";
 import type { Account, CharacterId, FactsSnapshot, FinanceEvent, IndicatorId, Plan } from "../../contracts/src";
+import { bottomLine } from "./bottomline";
 import { checkMessage } from "./checker";
 import { geminiQuota, parseQuotaError, QuotaError } from "./quota";
 
@@ -192,7 +193,7 @@ export function buildPrompt(
     `How to write:`,
     `- Talk TO the user as "you". Never use their name or call them "the user".`,
     isCoach
-      ? `- At most 3 short sentences: the plan in plain words (where each part of the money goes and why), then the action.`
+      ? `- Start with "Bottom line:" and the one thing to do now, in plain words, and why (one sentence). If the plan has more parts, mention them in one short sentence as extras for later. At most 3 short sentences.`
       : `- One message, at most 2 short sentences: the one number that matters most right now, from KEY NUMBERS, and what it means for the user in plain words (like "that costs you $X a month in interest").`,
     ...(isCoach ? [] : [`- Explain, don't persuade. Never ask for the money yourself ("put it in me", "send it to me", "pay me first"); say what it would do for the user.`]),
     ...(!isCoach && heard?.length
@@ -248,9 +249,11 @@ const REASON: Record<string, string> = {
 
 /** Coach's grounded plan message. `ask` is the proposal's action text, the one thing a YES approves. */
 export function planTemplate(plan: Plan, ask?: string | null): string {
-  const lines = plan.lines.map((l) => `${usd(l.amount)} to ${destName(l.destination)} ${REASON[l.reasonCode] ?? ""}`.trim());
-  const head = lines.length === 1 ? `Here's the call: ${lines[0]}.` : `Here's the plan: ${lines.join("; ")}.`;
-  return ask ? `${head} Reply YES to: ${ask}.` : `${head} Reply YES to approve, or tell me what to change.`;
+  const [first, ...rest] = plan.lines.filter((l) => l.amount > 0);
+  if (!first) return ask ? `Bottom line: ${ask}. Reply YES to: ${ask}.` : `Bottom line: nothing to move right now.`;
+  const head = `Bottom line: ${usd(first.amount)} to ${destName(first.destination)} ${REASON[first.reasonCode] ?? ""}`.trim() + ".";
+  const extra = rest.length ? ` The plan also suggests ${rest.map((l) => `${usd(l.amount)} to ${destName(l.destination)}`).join(" and ")} for later.` : "";
+  return ask ? `${head}${extra} Reply YES to: ${ask}.` : `${head}${extra} Reply YES to approve, or tell me what to change.`;
 }
 
 export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | null, ask?: string | null): string {
@@ -274,7 +277,7 @@ export function template(id: CharacterId, facts: FactsSnapshot, plan?: Plan | nu
         ? `${usd(a("ira").unclaimedMatchThisYear!)} of employer match is still unclaimed this year. Contributing would capture that free money.`
         : `Your IRA is at ${usd(a("ira").balance)}.`;
     case "coach":
-      return `Here's where things stand. Ask me about any account, or @mention one of them, and I'll walk you through it.`;
+      return bottomLine(facts, null);
   }
 }
 
@@ -359,9 +362,16 @@ export function coachProblem(
   if (!plan) {
     // No plan (a plain chat answer): only an account that just argued may be called "right".
     const spoke = (n: string) => heard?.some((h) => h.name.toLowerCase() === n) ?? false;
-    return crowned.some((n) => !spoke(n)) ? `Don't say any account "is right"; nobody argued. Just answer the question.` : null;
+    if (crowned.some((n) => !spoke(n))) return `Don't say any account "is right"; nobody argued. Just answer the question.`;
+    // Closing a debate with nothing to approve: a bottom line, and never a YES invite (it could approve something else).
+    if (heard?.length) {
+      if (/reply yes/i.test(text)) return `There's no plan to approve here; don't ask them to reply YES.`;
+      if (!/^\s*Bottom line:/i.test(text)) return `Start with "Bottom line:" and whether they need to do anything now.`;
+    }
+    return null;
   }
   if (ask && !text.includes(`Reply YES to: ${ask}`)) return `It must end with exactly "Reply YES to: ${ask}."`;
+  if (!/^\s*Bottom line:/i.test(text)) return `Start with "Bottom line:" and the one thing to do now.`;
   const first = plan.lines[0];
   if (!first) return null;
   const winner = destName(String(first.destination));

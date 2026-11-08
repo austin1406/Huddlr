@@ -5,6 +5,8 @@ import { proposalFromPlan } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
 import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
+import { bottomLine } from "./bottomline";
+import { isBottomLineQuestion } from "./replies";
 import { explainTemplate, lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
@@ -81,7 +83,7 @@ async function pendingPlan(db: Queryable, phone: string) {
   // For the Coach's "who is right" rule (it follows the first line): lead with the line the YES moves.
   const yesLine = plan.lines.find((l) => l.destination === row.to_account && l.amount > 0) ?? null;
   const coachPlan = leadWith(plan, yesLine);
-  return { actionText: row.action_text, source: row.source_event_id, plan, coachPlan, planAmount: plan.amount, split };
+  return { actionText: row.action_text, to: row.to_account, source: row.source_event_id, plan, coachPlan, planAmount: plan.amount, split };
 }
 
 /** The last few texts both ways (not counting this one), as "you: …" / "Savings: …" lines, plus every number in them. */
@@ -167,6 +169,15 @@ export async function handleChat(
   }
 
   const pending = await pendingPlan(deps.db, deps.userPhone);
+
+  // "So what should I do?" gets one clear answer from the Coach, built in code: the action, why, and the rest.
+  // ("I got a $600 bonus, what should I do?" is a new question about new money: that's the bonus debate below.)
+  if (isBottomLineQuestion(text) && !parseWindfall(text) && (!parseMention(text) || parseMention(text)!.who === "coach")) {
+    const facts = await deps.facts();
+    const answer = bottomLine(facts, pending ? { actionText: pending.actionText, to: pending.to, plan: pending.plan, windfall: pending.source?.startsWith("chat_windfall_") ?? false } : null);
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:bottomline`, speaker: "coach", text: answer });
+    return { learned: 0, responder: "coach" };
+  }
 
   // "Give me a summary of my account": every account in one message, built in code. No YES invite beyond
   // naming the plan that's already waiting.

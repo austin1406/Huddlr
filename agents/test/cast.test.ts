@@ -59,9 +59,10 @@ test("Coach rule: must end with the exact YES line and must not crown the wrong 
   const ask = "Move $143.00 from Savings to Checking";
   const shortPlan = { ...plan, lines: [{ destination: "checking" as const, amount: 143, reasonCode: "cover_shortfall" as const, reasonNumbers: {} }] };
   const heard = [{ name: "Checking", text: "x" }, { name: "Savings", text: "y" }];
-  assert.equal(coachProblem("coach", `Checking is right. Reply YES to: ${ask}.`, shortPlan, ask, heard), null);
+  assert.equal(coachProblem("coach", `Bottom line: Checking is right. Reply YES to: ${ask}.`, shortPlan, ask, heard), null);
+  assert.match(coachProblem("coach", `Checking is right. Reply YES to: ${ask}.`, shortPlan, ask, heard)!, /Bottom line/, "must open with the bottom line");
   assert.match(coachProblem("coach", "Checking is right. Approve it?", shortPlan, ask, heard)!, /Reply YES to/);
-  assert.match(coachProblem("coach", `Savings is right. Reply YES to: ${ask}.`, shortPlan, ask, heard)!, /Only Checking/);
-  assert.match(coachProblem("coach", `Checking is right. Reply YES to: ${ask}.`, shortPlan, ask, [{ name: "Savings", text: "y" }])!, /didn't speak/);
+  assert.match(coachProblem("coach", `Bottom line: Savings is right. Reply YES to: ${ask}.`, shortPlan, ask, heard)!, /Only Checking/);
+  assert.match(coachProblem("coach", `Bottom line: Checking is right. Reply YES to: ${ask}.`, shortPlan, ask, [{ name: "Savings", text: "y" }])!, /didn't speak/);
   assert.equal(coachProblem("card", "anything", shortPlan, ask, heard), null);
 });
