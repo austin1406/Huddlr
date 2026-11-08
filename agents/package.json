@@ -12,7 +12,8 @@
     "local": "tsx src/server.ts --local",
     "gate1": "tsx src/gate1.ts",
     "reset": "tsx src/reset.ts",
-    "gemini-status": "tsx src/gemini-status.ts"
+    "gemini-status": "tsx src/gemini-status.ts",
+    "gate2": "tsx src/gate2.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
