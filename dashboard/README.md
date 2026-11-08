@@ -58,12 +58,10 @@ built from P1's numbers (no AI, so every number is exact). Under the table: your
 
 ### Who sits at the table
 
-- **One seat per account**, evenly spaced, whatever the number: what you have on the left, what you owe on the right.
+- **One seat per account**, evenly spaced: what you have on the left, what you owe on the right.
 - **Every loan sits with one 🧾 Loan person**: the bank's car loan, any other `*_loan` account, and loans the user
   told the chat about (P2 keeps them in `memory_facts` as `loan:<name>`). The seat shows the total; tapping it lists
   each loan. Loans told by text are marked as not in the bank data (so not in the forecast).
-- **Any other account P1 adds gets its own seat automatically**, e.g. `kind: "cd"` (🔒 CD: rate, locked-until date)
-  or `kind: "mortgage"` (🏠 Mortgage). Names and emoji come from `cast.json` if a character exists for it.
 - The team dashboard's account cards follow the same rule (one Loan card with the breakdown).
 
 ### Signing in

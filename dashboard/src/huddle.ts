@@ -67,17 +67,10 @@ export function statusFor(ind: { direction: string; goodAt: number; concernAt: n
 }
 
 const BILL_OWNER: Record<string, string> = { car_loan: "car_loan", card_minimum: "card" };
-/** Accounts with their own hand-written seat. Every other account still gets a seat (see below). */
+/** Accounts with their own seat. */
 const KNOWN = new Set(["checking", "savings", "card", "car_loan", "ira"]);
-/** Every kind of loan (student, personal, auto, ...) sits with the one Loan person. A mortgage keeps its own seat. */
-const isLoanKind = (kind: string) => /loan/i.test(kind) && !/mortgage/i.test(kind);
-const OWE_KINDS = /loan|mortgage|credit|debt|line_of_credit/i;
-const DEFAULT_LOOK: Record<string, { name: string; emoji: string }> = {
-  cd: { name: "CD", emoji: "🔒" },
-  mortgage: { name: "Mortgage", emoji: "🏠" },
-  brokerage: { name: "Investments", emoji: "📈" },
-  hsa: { name: "HSA", emoji: "🩺" },
-};
+/** Every kind of loan (car, student, personal, ...) sits with the one Loan person. */
+const isLoanKind = (kind: string) => /loan/i.test(kind);
 const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
 
 /** A loan the user told the chat about (P2's memory_facts, key loan:<name>). */
@@ -251,36 +244,6 @@ export function buildHuddle(facts: any, cast: any[], extras: { reportedLoans?: R
         ...(told.length ? [{ label: "Loans you told us about", value: String(told.length), note: "not in your bank data, so not in the forecast" }] : []),
       ],
       upcoming: bill ? [{ date: bill.dueDate, label: bill.label, amount: bill.amount, sign: "-" }] : [],
-    });
-  }
-
-  // Anything else the bank data adds (a CD, a mortgage, ...) gets its own seat.
-  for (const a of facts.accounts.filter((x: any) => !KNOWN.has(x.id) && !isLoanKind(x.kind))) {
-    const owes = OWE_KINDS.test(a.kind);
-    const c = cast.find((x) => x.id === a.characterId || x.id === a.id);
-    const look = DEFAULT_LOOK[a.kind] ?? { name: a.name, emoji: owes ? "📄" : "💼" };
-    const rate = a.aprPercent != null ? `${a.aprPercent}%` : null;
-    const until = a.maturityDate ? day(a.maturityDate) : null;
-    people.push({
-      id: a.id,
-      group: owes ? "owe" : "have",
-      name: c?.name ?? a.name ?? look.name,
-      emoji: c?.emoji ?? look.emoji,
-      balance: a.balance,
-      status: "good",
-      mood: "happy",
-      says: owes
-        ? `You owe ${money(a.balance)}.${a.monthlyPayment != null ? ` ${money(a.monthlyPayment)} a month.` : ""}${rate ? ` My rate is ${rate}.` : ""}`
-        : a.kind === "cd"
-          ? `I hold ${money(a.balance)}${rate ? ` at ${rate}` : ""}${until ? `, locked until ${until}` : ""}. Taking it out early costs a penalty.`
-          : `I hold ${money(a.balance)}.`,
-      detail: [
-        { label: owes ? "You owe" : "Balance now", value: money(a.balance) },
-        ...(rate ? [{ label: "Interest rate", value: rate }] : []),
-        ...(a.monthlyPayment != null ? [{ label: "Monthly payment", value: money(a.monthlyPayment) }] : []),
-        ...(until ? [{ label: "Locked until", value: until }] : []),
-      ],
-      upcoming: [],
     });
   }
 

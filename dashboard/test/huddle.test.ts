@@ -134,27 +134,17 @@ test("paying the car loan points out the card saves more", async () => {
   assert.match(r.reactions.find((x) => x.id === "card")!.text, /24% vs 6\.9%/);
 });
 
-test("every loan sits with one Loan person; a CD and a mortgage get their own seats", () => {
+test("every loan sits with one Loan person", () => {
   const f = facts();
-  f.accounts.push(
-    { id: "cd", kind: "cd", name: "12-month CD", characterId: "cd", balance: 2000, aprPercent: 4.5, maturityDate: "2027-06-01" },
-    { id: "mortgage", kind: "mortgage", name: "Mortgage", characterId: "mortgage", balance: 210000, monthlyPayment: 1400, aprPercent: 6.2 },
-    { id: "student", kind: "student_loan", name: "Student loan", characterId: "car_loan", balance: 8000 },
-  );
+  f.accounts.push({ id: "student", kind: "student_loan", name: "Student loan", characterId: "car_loan", balance: 8000 });
   const h = buildHuddle(f, cast, { reportedLoans: [{ label: "tuition", owed: 10000, aprPercent: 5 }] });
   const loan = h.people.find((p) => p.id === "car_loan")!;
   assert.equal(loan.name, cast.find((c: any) => c.id === "car_loan").name);
   assert.equal(loan.balance, 14500 + 8000 + 10000);
   assert.match(loan.says, /across 3 loans/);
   assert.ok(loan.detail.some((r) => r.label === "Tuition" && r.note?.includes("you told us by text")));
-  assert.equal(h.people.filter((p) => p.group === "owe").length, 3); // card, loan, mortgage
-  const cd = h.people.find((p) => p.id === "cd")!;
-  assert.equal(cd.group, "have");
-  assert.match(cd.says, /\$2,000 at 4\.5%, locked until Jun 1/);
-  assert.equal(h.people.find((p) => p.id === "mortgage")!.group, "owe");
-  assert.equal(h.have, 1186.5 + 900 + 8200 + 2000);
-  assert.equal(h.owe, 2400 + 32500 + 210000);
-  assert.ok(!h.people.some((p) => p.id === "student")); // merged into Loan, no seat of its own
+  assert.equal(h.people.length, 5); // no extra seat for the student loan
+  assert.equal(h.owe, 2400 + 32500);
 });
 
 test("paying the car loan shows the change on the whole Loan total", async () => {

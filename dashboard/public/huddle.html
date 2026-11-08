@@ -215,7 +215,7 @@ const money = (n) => { const a = Math.abs(n); return (n < 0 ? "-" : "") + "$" + 
 const M = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const day = (iso) => { const [, m, d] = iso.split("-").map(Number); return `${M[m - 1]} ${d}`; };
 const statusWord = { good: "On track", watch: "Keep an eye on", concern: "Needs attention" };
-const TINT = { checking: "#d8efec", savings: "#f8dde2", ira: "#e1f0d9", card: "#e7e0f6", car_loan: "#fbe5d3", cd: "#dfe7f7", mortgage: "#f2e6d3" };
+const TINT = { checking: "#d8efec", savings: "#f8dde2", ira: "#e1f0d9", card: "#e7e0f6", car_loan: "#fbe5d3" };
 const tint = (id) => TINT[id] || "#e6e9ef";
 
 /* ---------- the people (original simple illustrations) ---------- */
@@ -226,8 +226,6 @@ const LOOK = {
   card:     { skin: "#8d5a3c", hair: "#2b1d16", shirt: "#7b5cc4", style: "swoop",  extra: "earring" },
   car_loan: { skin: "#d9a074", hair: "#5b3b26", shirt: "#e8833a", style: "short",  extra: "cap" },
   coach:    { skin: "#b97a55", hair: "#1c1c1c", shirt: "#26407a", style: "short",  extra: "whistle" },
-  cd:       { skin: "#e3b38f", hair: "#7a4a2a", shirt: "#3f6fb5", style: "bun",    extra: "glasses" },
-  mortgage: { skin: "#a8714f", hair: "#2a2320", shirt: "#8a6d3b", style: "gray",   extra: "badge" },
 };
 // Anyone new at the table gets one of these, picked from their id so it stays the same every visit.
 const SPARE = [

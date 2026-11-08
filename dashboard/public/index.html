@@ -216,19 +216,16 @@ function renderHeader(s) {
   $("chatuser").textContent = s.user ? "demo user " + s.user : "no demo user";
 }
 
-// Every loan sits under one "Loan" card (the bank's car loan + any loan told by text). Any other account
-// the bank data adds (a CD, a mortgage, ...) gets its own card.
-const EXTRA_LOOK = { cd: ["🔒", "CD"], mortgage: ["🏠", "Mortgage"] };
-const isLoan = (k) => /loan/i.test(k) && !/mortgage/i.test(k);
+// Every loan sits under one "Loan" card: the bank's car loan + any loan told by text.
+const isLoan = (k) => /loan/i.test(k);
 function renderAccounts(f, told = []) {
   const loanAccts = f.accounts.filter((a) => isLoan(a.kind));
   const cards = f.accounts.filter((a) => !isLoan(a.kind)).map((a) => {
-    const owed = /credit|mortgage|debt/i.test(a.kind);
+    const owed = a.kind === "credit_card";
     const sub = a.kind === "credit_card" && a.limit ? `owed · ${a.aprPercent}% APR · limit ${money(a.limit)}`
       : a.kind === "ira" ? `retirement${a.simulated ? " · simulated" : ""}`
-      : a.kind === "cd" ? `locked${a.aprPercent != null ? " · " + a.aprPercent + "%" : ""}${a.maturityDate ? " · until " + a.maturityDate : ""}`
-      : owed ? `owed${a.monthlyPayment ? " · " + money(a.monthlyPayment) + "/mo" : ""}` : "balance";
-    const [emo, name] = CAST[a.characterId] || EXTRA_LOOK[a.kind] || ["•", a.name];
+      : "balance";
+    const [emo, name] = CAST[a.characterId] || ["•", a.name];
     return `<div class="acct"><div class="n">${emo} ${esc(name)}</div><div class="v">${money(a.balance, owed ? 0 : 2)}</div><div class="s">${esc(sub)}</div></div>`;
   });
   if (loanAccts.length || told.length) {
