@@ -259,6 +259,7 @@ export function buildPrompt(
     `- Copy numbers and dates exactly as written in KEY NUMBERS or FACTS. Never add, subtract, round, or invent a number.`,
     `- Plain words, no emoji, no "${c.name}:" prefix, no hashtags.`,
     `- You can't move money and never ask for passwords, codes, or account numbers. No specific investment picks.`,
+    `- If they ask for a link, the dashboard, or the Huddle page, tell them to text "huddle link" and they'll get one. Never say you can't give links.`,
     ``,
     `KEY NUMBERS:`,
     ...keyNumbers(id, facts, event).map((k) => `- ${k}`),

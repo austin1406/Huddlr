@@ -18,6 +18,12 @@ test("link requests are recognized; money questions are not", () => {
     assert.equal(isHuddleLinkRequest(t), false, t);
 });
 
+test("phone testing: everyday ways to ask for the link work too", () => {
+  for (const t of ["can i get the link", "can I have the link?", "where is the link", "wheres my link", "link", "the link?", "can u send me the link", "can i see the dashboard", "dashboard link"])
+    assert.equal(isHuddleLinkRequest(t), true, t);
+  for (const t of ["link my bank account", "can i link my card", "where is my money going", "can i get a loan"]) assert.equal(isHuddleLinkRequest(t), false, t);
+});
+
 async function setup() {
   const db = new PGlite();
   await migrate(db);
