@@ -67,6 +67,19 @@ finance isn't on localhost:4000).
 - "Can I afford a $40 dinner?" by text also goes straight to `can_i_afford`, so the answer is computed, not generated.
 - Locally: `curl -XPOST localhost:5055/agents/dev/photo -d '{"path":"test/fixtures/price-tag.png"}'`.
 
+## Talking to one character, and celebrations
+
+- **@-mentions:** a text that starts with `@savings`, `@card`, `@car`, `@ira`, `@checking` or `@coach` (also `@piggy`,
+  `@credit`, `@retirement`, `@bank`) is answered by that character only, whatever the topic. A bare `@savings` is a
+  check-in ("how am I doing with you?"). Only a leading `@` counts, so an email address never reroutes a text.
+- **Celebrations:** when P1 reports a transfer (`user_transfer_seen`) into Savings or the IRA, or a payment to the Card
+  or Car Loan, that character cheers with the new number ("Yes! $200.00 just landed with me. That's 0.45 months of
+  essentials saved now."). Money into Checking is cheered only when it closed a shortfall the crew reacted to in the
+  last 7 days ("…the gap is closed. Crisis averted"). Pre-written text built from P1's numbers, so no Gemini call and
+  always grounded. Respects quiet hours and the daily cap; held cheers show up in the evening recap.
+- Try it on the VM (finance's engine mode): `cd finance && npm run post-transfer -- checking savings 200`. The cheer
+  arrives within ~5 s. Locally, `agents/test/celebrate.test.ts` covers every case.
+
 ## Rules that are tested
 
 - 0 ungrounded numbers: Gate 1 (30 runs) runs in CI with a test model that invents a number in every other reply.

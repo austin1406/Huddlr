@@ -10,6 +10,26 @@ import { queueOutbox } from "./outbox";
 import { maybeAnswerAfford } from "./photo";
 import { isRecallQuestion, recallAnswer } from "./recall";
 
+const MENTION_ALIASES: Record<string, CharacterId> = {
+  checking: "checking", check: "checking", bank: "checking",
+  savings: "savings", saving: "savings", piggy: "savings",
+  card: "card", credit: "card", creditcard: "card",
+  carloan: "car_loan", car_loan: "car_loan", car: "car_loan", loan: "car_loan",
+  ira: "ira", retirement: "ira",
+  coach: "coach",
+};
+
+/**
+ * "@savings how am I doing?" -> that character answers, with the @name removed from the question.
+ * Only a leading @name counts, so an email address or "@" mid-sentence never reroutes a text.
+ */
+export function parseMention(text: string): { who: CharacterId; rest: string } | null {
+  const m = text.trim().match(/^@\s*([a-z_]+(?:\s+loan)?)\b[\s,:-]*(.*)$/is);
+  if (!m) return null;
+  const who = MENTION_ALIASES[m[1].toLowerCase().replace(/\s+/g, "")];
+  return who ? { who, rest: m[2].trim() } : null;
+}
+
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
 export function pickResponder(text: string): CharacterId {
   const t = text.toLowerCase();
@@ -49,10 +69,16 @@ export async function handleChat(
     return { learned: learned.length, responder: "coach" };
   }
 
-  const responder = pickResponder(text);
+  // "@savings ..." picks the speaker; otherwise route by topic. A bare "@savings" is a check-in.
+  const mention = parseMention(text);
+  const responder = mention?.who ?? pickResponder(text);
+  const question = mention ? mention.rest || "How am I doing with you right now?" : text;
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
-  const r = await speak(responder, facts, `The user texted: "${text}". Answer them directly in character.${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}`, {
+  const ask = mention
+    ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
+    : `The user texted: "${question}". Answer them directly in character.`;
+  const r = await speak(responder, facts, `${ask}${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}`, {
     model: deps.model,
     // Numbers the user typed themselves ("can I afford $40?") are fair to repeat back.
     extraSources: [...goals.map((g) => g.value), extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : []))],

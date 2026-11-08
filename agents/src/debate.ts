@@ -7,6 +7,7 @@
 // Budgets: first message ~5 s, plan ~15 s (real clock, latency). Round 2 is skipped for now: one round fits the
 // budget and keeps the chat quiet. Calendar decisions (quiet hours, cap) use the simulated clock.
 import { localDate, type CharacterId, type FactsSnapshot, type FinanceEvent, type Plan, type ProposalService } from "../../contracts/src";
+import { celebration, celebrationTiming } from "./celebrate";
 import { character, config, speak } from "./character";
 import type { Queryable } from "./db";
 import type { Finance } from "./finance";
@@ -64,6 +65,15 @@ async function proactiveSentToday(db: Queryable, phone: string, now: Date, timez
   return r.rows.filter((row) => localDate(new Date(row.created_sim_at), timezone) === today).length;
 }
 
+/** Did the crew react to a shortfall in the last 7 simulated days? Then money into Checking is a rescue worth cheering. */
+async function hadRecentShortfall(db: Queryable, phone: string, now: Date): Promise<boolean> {
+  const r = await db.query(
+    "SELECT 1 FROM agent_event_reactions WHERE user_phone = $1 AND event_id LIKE 'evt_forecast_problem%' AND outcome = 'reacted' AND reacted_sim_at > $2::timestamptz - interval '7 days' LIMIT 1",
+    [phone, now],
+  );
+  return r.rows.length > 0;
+}
+
 const situation = (id: CharacterId, event: FinanceEvent) =>
   id === "coach"
     ? `The accounts just reacted to this: ${event.type}. Settle it with the plan.`
@@ -83,9 +93,29 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
   if (!claim.rows[0]) return { ...result, decision: "duplicate", reason: "already handled" };
 
   const facts = await finance.facts();
+  const sentToday = await proactiveSentToday(db, userPhone, now, facts.timezone);
+
+  // A good move (saving, paying down debt, closing a gap) gets one cheer from the account it helped.
+  const cheer = celebration(event, facts, await hadRecentShortfall(db, userPhone, now));
+  if (cheer) {
+    const timing = celebrationTiming({ now, timezone: facts.timezone, demoMode, proactiveSentToday: sentToday });
+    result.decision = timing;
+    result.reason = timing === "react" ? "celebration" : "celebration held (quiet hours or daily cap)";
+    await db.query("UPDATE agent_event_reactions SET outcome = $2 WHERE event_id = $1", [event.id, timing === "react" ? "reacted" : "digested"]);
+    if (timing === "react") {
+      await queueOutbox(db, {
+        idempotency_key: `evt:${event.id}:cheer`, user_phone: userPhone, speaker: cheer.speaker, text: cheer.text, thread_key: `evt:${event.id}`,
+        event_id: event.id, priority: 0, created_sim_at: now.toISOString(),
+      });
+      result.firstMessageMs = Date.now() - started;
+      result.messages.push({ speaker: cheer.speaker, source: "celebration", ms: result.firstMessageMs });
+    }
+    return result;
+  }
+
   const decision = decide(event, {
     now, timezone: facts.timezone, demoMode, alreadyHandled: false, facts,
-    proactiveSentToday: await proactiveSentToday(db, userPhone, now, facts.timezone),
+    proactiveSentToday: sentToday,
   });
   result.decision = decision.action;
   result.reason = decision.reason;
