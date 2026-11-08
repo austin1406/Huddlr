@@ -14,6 +14,7 @@ import {
 import type { Queryable } from "./db";
 import { queueOutbox } from "./outbox";
 import { geminiQuota } from "./quota";
+import { config, usingOpenAI } from "./character";
 import type { makeProposalService } from "./proposals";
 
 type Service = ReturnType<typeof makeProposalService>;
@@ -50,7 +51,9 @@ export function createApp(opts: { db: Queryable; proposals: Service; secret: str
   app.get(p.health.path, async (c) => {
     const dbOk = await db.query("SELECT 1").then(() => true, () => false);
     // Gemini being rate-limited is not a health failure (templates keep working), so it doesn't change the status code.
-    return c.json({ ok: dbOk, service: "agents", gemini: geminiQuota.status() }, dbOk ? 200 : 503);
+    // Which AI writes the characters' lines right now (GPT when OPENAI_API_KEY is set; Gemini is the backup).
+    const characters = usingOpenAI() ? `openai ${process.env.OPENAI_MODEL || config.character_model.openai_model} (gemini backup)` : `gemini ${process.env.CHARACTER_MODEL || config.character_model.model}`;
+    return c.json({ ok: dbOk, service: "agents", characters, gemini: geminiQuota.status() }, dbOk ? 200 : 503);
   });
 
   app.use("*", async (c, next) => {

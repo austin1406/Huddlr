@@ -415,6 +415,30 @@ export async function callModel(prompt: string, opts: { model: string; apiKey: s
   return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").replace(/\s*\n+\s*/g, " ").trim();
 }
 
+/** GPT writes the characters' lines when OPENAI_API_KEY is set (CHARACTER_PROVIDER=gemini switches it back). */
+export function usingOpenAI(): boolean {
+  return !!process.env.OPENAI_API_KEY && process.env.CHARACTER_PROVIDER !== "gemini";
+}
+
+/** Call OpenAI's chat completions over REST (no SDK dependency). Same job and limits as the Gemini call. */
+export async function callOpenAI(prompt: string, opts: { model: string; apiKey: string; timeoutMs: number }): Promise<string> {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${opts.apiKey}` },
+    body: JSON.stringify({
+      model: opts.model,
+      messages: [{ role: "user", content: prompt }],
+      max_completion_tokens: config.character_model.max_output_tokens,
+      // No hidden "thinking": a short text reply should come back in about a second.
+      ...(config.character_model.openai_reasoning_effort ? { reasoning_effort: config.character_model.openai_reasoning_effort } : {}),
+    }),
+    signal: AbortSignal.timeout(opts.timeoutMs),
+  });
+  if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
+  return (data.choices?.[0]?.message?.content ?? "").replace(/\s*\n+\s*/g, " ").trim();
+}
+
 export interface SpeakResult {
   text: string;
   source: "model" | "retry" | "template";
@@ -501,21 +525,30 @@ export async function speak(
   const started = Date.now();
   const cm = config.character_model;
   const deadline = opts.deadline ?? started + config.debate.first_message_target_ms;
+  const timeoutMs = () => Math.max(500, Math.min(cm.timeout_ms, deadline - Date.now()));
+  const gemini = (p: string) => callModel(p, { model: process.env.CHARACTER_MODEL || cm.model, apiKey: process.env.GEMINI_API_KEY ?? "", timeoutMs: timeoutMs() });
+  const gpt = usingOpenAI();
   const model =
     opts.model ??
-    ((p: string) =>
-      callModel(p, {
-        model: process.env.CHARACTER_MODEL || cm.model,
-        apiKey: process.env.GEMINI_API_KEY ?? "",
-        timeoutMs: Math.max(500, Math.min(cm.timeout_ms, deadline - Date.now())),
-      }));
+    (gpt
+      ? // GPT writes the line; if it errors or is rate-limited, Gemini answers instead (same checks either way).
+        async (p: string) => {
+          try {
+            return await callOpenAI(p, { model: process.env.OPENAI_MODEL || cm.openai_model, apiKey: process.env.OPENAI_API_KEY!, timeoutMs: timeoutMs() });
+          } catch (err) {
+            if (!process.env.GEMINI_API_KEY || geminiQuota.limited()) throw err;
+            console.warn(`[agents] GPT failed (${(err as Error).message.slice(0, 80)}); Gemini answered instead`);
+            return gemini(p);
+          }
+        }
+      : gemini);
   const attempts: SpeakResult["attempts"] = [];
   let prompt = buildPrompt(id, facts, situation, opts.event, opts.plan, opts.ask, opts.heard);
   const sources = [factsFor(id, facts, opts.event), ...(opts.plan ? [opts.plan] : []), ...(opts.extraSources ?? [])];
 
   for (const source of ["model", "retry"] as const) {
     if (source === "retry" && deadline - Date.now() < config.debate.checker_retry_only_if_ms_remaining) break;
-    if (!opts.model && geminiQuota.limited()) {
+    if (!opts.model && !gpt && geminiQuota.limited()) {
       attempts.push({ error: `skipped: Gemini ${geminiQuota.status().scope ?? ""} limit` });
       break;
     }
