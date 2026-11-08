@@ -157,3 +157,14 @@ test("every tool field has a description (ElevenLabs rejects fields without one)
   const missing = buildTools("https://x", "s").flatMap((t) => walk(t.api_schema.request_body_schema as any, t.name));
   assert.deepEqual(missing, []);
 });
+
+test("recap accepts whole-dollar rounding of a tool number, not made-up ones", async () => {
+  const { isGrounded } = await import("../src/postCall");
+  const g = new Set(["437.5", "40", "1186.5"]);
+  assert.ok(isGrounded("437", g));
+  assert.ok(isGrounded("438", g));
+  assert.ok(isGrounded("40", g));
+  assert.ok(isGrounded("1186", g));
+  assert.ok(!isGrounded("500", g));
+  assert.ok(!isGrounded("437.25", g));
+});
