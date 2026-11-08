@@ -81,11 +81,11 @@ test("ignores other webhook types", () => {
 });
 
 test("recap uses the summary only when every number in it came from a tool", () => {
-  const ok = buildRecap(parsePostCall(payload({ summary: "Sreyas asked about a $40 dinner; $212.50 is safe to spend." }), "")!);
+  const ok = buildRecap(parsePostCall(payload({ summary: "Maya asked about a $40 dinner; $212.50 is safe to spend." }), "")!);
   assert.equal(ok.usedSummary, true);
   assert.match(ok.text, /\$212\.50/);
 
-  const invented = buildRecap(parsePostCall(payload({ summary: "Sreyas has $999 left." }), "")!);
+  const invented = buildRecap(parsePostCall(payload({ summary: "Maya has $999 left." }), "")!);
   assert.equal(invented.usedSummary, false);
   assert.doesNotMatch(invented.text, /999/);
 });

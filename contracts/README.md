@@ -22,7 +22,7 @@ Run `npm install` inside `contracts/` once (it needs `zod`). `npm test` typechec
 | `src/scenarios.ts` | What-if scenarios and result | P1 |
 | `src/tools.ts` | Finance service endpoints and the six tool request and response schemas | P1 |
 | `src/time.ts` | `SimClock`, `now()`, `jumpDays`, `localDate`, `localHour`, `isQuietHours` | P1 |
-| `src/persona.ts` and `persona.json` | The demo customer (Sreyas) used by the seed script and the persona data source | P1 |
+| `src/persona.ts` and `persona.json` | The demo customer (Maya) used by the seed script and the persona data source | P1 |
 | `thresholds.json` | Cushion, big-purchase size, indicator cutoffs | P1 |
 | `fixtures/` | Facts (normal and rent-week shortfall), events, plan, what-if, `sim_state` | P1 |
 | `src/agents.ts` | Outbox and inbound rows, proposals, `ProposalService` and its HTTP API, `call_requests`, memory rows, reply rules | P2 |
