@@ -93,7 +93,7 @@ test("welcome: the Coach introduces the crew on a phone's first text, once", asy
   assert.equal(out.rows.length, 1);
   assert.equal(out.rows[0].speaker, "coach");
   assert.equal(out.rows[0].text, welcomeText());
-  assert.match(welcomeText(), /^Meet your money: 🏦 Checking, 🐷 Savings, 💳 Card, 🧾 Loan and 🌱 IRA each watch one account\. 🧭 Coach always gives the final plan\. Ask anything, or @mention one of them \(like @Savings\)\.$/);
+  assert.match(welcomeText(), /^Welcome to your money's group chat! You're now chatting with 🏦 Checking, 🐷 Savings, 💳 Card, 🧾 Loan and 🌱 IRA\. Each one watches one of your accounts, and 🧭 Coach turns what they say into one plan\. Ask the group anything, or @mention one of them \(like @Savings\)\.$/);
 });
 
 test("an option with a false 'Adding to X:' lead-in loses it and isn't threaded under X", async () => {
