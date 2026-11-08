@@ -33,6 +33,6 @@ export function accountSummary(facts: FactsSnapshot, priorities: Priorities | nu
   if (ira) lines.push(`${emoji("ira")} IRA: ${usd(ira.balance)}${ira.unclaimedMatchThisYear ? `, with ${usd(ira.unclaimedMatchThisYear)} of employer match still unclaimed` : ""}.`);
   const prio = describePriorities(priorities);
   if (prio) lines.push(`Your priorities: ${prio}.`);
-  if (waiting) lines.push(`Waiting on your YES: ${waiting}.`);
+  if (waiting) lines.push(`Still to do: ${waiting} in your bank app.`);
   return lines.join("\n");
 }

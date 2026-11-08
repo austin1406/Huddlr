@@ -39,7 +39,10 @@ test("the Coach can't call an account 'right' in a plain chat answer", () => {
   assert.match(coachProblem("coach", "Checking is also right here.")!, /nobody argued/);
   assert.equal(coachProblem("coach", "Your lowest point is $537.50 on Nov 19."), null);
   // In a debate with no plan, an account that actually argued may still be named.
-  assert.equal(coachProblem("coach", "Card is right.", null, null, [{ name: "Card", text: "pay me" }]), null);
+  assert.equal(coachProblem("coach", "Bottom line: Card is right.", null, null, [{ name: "Card", text: "pay me" }]), null);
+  // Closing a debate with no plan: a bottom line, never a YES invite.
+  assert.match(coachProblem("coach", "Card is right.", null, null, [{ name: "Card", text: "x" }])!, /Bottom line/);
+  assert.match(coachProblem("coach", "Bottom line: pay it. Reply YES to approve.", null, null, [{ name: "Card", text: "x" }])!, /no plan to approve/);
 });
 
 test("'tn' and friends aren't part of the item", () => {

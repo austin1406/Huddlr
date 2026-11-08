@@ -10,7 +10,7 @@ phrases it, and a code checker rejects any number that isn't in that character's
 
 ```
 P1 /events ──► agents (poll every 5 s) ──► moderator ──► characters in parallel ──► number checker ──► outbox ──► P3 sends
-                                                    └─► Coach: P1 get_plan ──► proposal ──► "Reply YES to: …"
+                                                    └─► Coach: P1 get_plan ──► proposal ──► "Bottom line: … in your bank app."
 P3 inbound_messages ──► agents (poll every 1 s) ──► YES/NO ──► ProposalService ◄── P1 accept_proposal (voice) / watcher /complete
 follow_ups (sim clock) ──► reminder at 60 min ──► escalation at 90 min ──► call_requests ──► P4 calls
 ```
@@ -71,12 +71,12 @@ finance isn't on localhost:4000).
 
 - "Prioritize my IRA over savings", "pay off the card first", "card first, then savings", "savings can wait",
   "don't touch my savings", "reset my priorities": saved as `pref:priorities` in memory_facts and confirmed by the
-  Coach. The YES of every plan then moves the user's top-ranked part first (a shortfall is always covered first). A
-  plan already waiting is re-pointed ("I've updated the plan. Reply YES to: …"), and the old YES can't approve it.
+  Coach. Every plan's one move then goes to the user's top-ranked part first (a shortfall is always covered first). A
+  plan already waiting is re-pointed ("I've updated the plan: Move … in your bank app.").
 - Priorities are sent to P1's `get_plan` as an optional `priorities: { first, last }`. The planner ignores it until it
-  supports it; until then priorities change which part is the YES, not the amounts.
+  supports it; until then priorities change which part is the move, not the amounts.
 - "Give me a summary of my account" / "where do I stand": every account in one Coach message, built in code, plus
-  priorities and any plan waiting for YES.
+  priorities and any move still to do.
 
 ## How a multi-character reply reads
 
@@ -87,7 +87,7 @@ finance isn't on localhost:4000).
    retries once before the pre-written line.
 3. A later account can answer an earlier one by name ("Adding to Card: …"); it's threaded under that message in
    iMessage via `outbox.reply_to_outbox`.
-4. The Coach closes with the plan, each part with its own amount, and "Reply YES to: …".
+4. The Coach closes with "Bottom line:", the one move ("Move $457.00 from Checking to Card in your bank app."), and the rest for later. It never asks for a YES: the Coach can't move money.
 
 A phone's first text ever gets the Coach's welcome first ("Meet your money: 🏦 Checking, 🐷 Savings, …"), built from
 `contracts/cast.json`, once per phone (again after a reset).
@@ -98,7 +98,7 @@ A phone's first text ever gets the Coach's welcome first ("Meet your money: 🏦
   `@credit`, `@retirement`, `@bank`) is answered by that character only, whatever the topic. A bare `@savings` is a
   check-in ("how am I doing with you?"). Only a leading `@` counts, so an email address never reroutes a text.
 - **Celebrations:** when P1 reports a transfer (`user_transfer_seen`) into Savings or the IRA, or a payment to the Card
-  or Car Loan, that character cheers with the new number ("Yes! $200.00 just landed with me. That's 0.45 months of
+  or Car Loan, that character cheers with the new number ("Nice, $200.00 just landed in savings. You now have enough saved to cover about 2 weeks of must-pay bills…" (was "0.45 months of
   essentials saved now."). Money into Checking is cheered only when it closed a shortfall the crew reacted to in the
   last 7 days ("…the gap is closed. Crisis averted"). Pre-written text built from P1's numbers, so no Gemini call and
   always grounded. Respects quiet hours and the daily cap; held cheers show up in the evening recap.
@@ -109,13 +109,13 @@ A phone's first text ever gets the Coach's welcome first ("Meet your money: 🏦
 
 A text with one dollar amount and a windfall word (bonus, refund, tax return, gift, inheritance, commission, ...) or
 "what should I do with" gets the whole crew, not one answer: P1 plans for that amount, the account the plan favors
-argues with one rival, and the Coach closes with "Reply YES to: …". It's a reply, so the daily cap and quiet hours
-don't apply, and there's a reminder later but never a call. A new plan replaces any plan still waiting, so YES always
+argues with one rival, and the Coach closes with the bottom line and the move to make in the bank app. It's a reply, so the daily cap and quiet hours
+don't apply, and there's a reminder later but never a call. A new plan replaces any plan still waiting, so the move always
 approves what the latest message asked. `@savings I got a bonus…` still gets one voice.
 The bonus is already in Checking, so a Checking line in P1's plan means "keep this much there" (when short before
-payday), never a transfer into Checking; the YES moves the rest out of Checking ("Move $457.00 from Checking to Card").
+payday), never a transfer into Checking; the move takes the rest out of Checking ("Move $457.00 from Checking to Card").
 Follow-ups ("why…", "what about the 600?") go to the Coach with the last few texts and the waiting plan, under the
-same YES-line and "who is right" rules as a debate; asking about the same bonus again explains the plan instead of
+same bottom-line and "who is right" rules as a debate; asking about the same bonus again explains the plan instead of
 starting a new one. Replay the phone conversation with real Gemini: `npx tsx scripts/try-windfall.ts`.
 
 ## Rules that are tested
@@ -123,8 +123,11 @@ starting a new one. Replay the phone conversation with real Gemini: `npx tsx scr
 - 0 ungrounded numbers: Gate 1 (30 runs) runs in CI with a test model that invents a number in every other reply.
 - At most 3 speakers per event, Coach last. Quiet hours 22:00–08:00 and a cap of 6 proactive messages a day
   (`demo_mode` lifts both). Emergencies ignore both.
-- Only a clear YES approves. "maybe", "yes but $50", "ok wait" never do (0 of 20 in Gate 2).
-- One pending plan per user; it expires after 2 simulated hours. A second YES does nothing.
+- The Coach never asks for a YES: it says "Bottom line: … in your bank app." and the plan is checked off when P1's
+  watcher sees the transfer (reminder at 60 min; for a shortfall, a call at 90 min if the money hasn't moved). A YES
+  text still records agreement (and stops reminders); NO dismisses the plan. Anything else ("maybe", "ok wait", a
+  question) is answered like any text; it never approves (0 of 20 in Gate 2) and never gets a "reply YES" nudge.
+- One open plan per user; it expires after 2 simulated hours.
 - Never react to the same event id twice.
 
 ## Metrics
@@ -145,9 +148,9 @@ p50 711 ms / p90 990 ms, plan p50 2.3 s / p90 4.7 s, 0 ungrounded numbers.
 
 ## Safety text for Devpost
 
-> **The AI can talk, but it can't move your money.** Huddlr's characters can only *propose* a transfer. You approve it
-> with a clear YES, and you move the money yourself in your own bank. An unclear reply ("maybe", "yes but only $50")
-> is treated as no.
+> **The AI can talk, but it can't move your money.** Huddlr's characters can only *suggest* a move. The Coach ends
+> with one plain action ("Move $150.00 from Checking to IRA in your bank app"), and you make it yourself in your own
+> bank. Nothing is ever moved for you, and no reply you send can move money either.
 >
 > **Every number comes from code.** A plain-code finance engine computes balances, forecasts, and plans. The language
 > model only phrases them, and a number checker rejects any figure that isn't in the facts it was given, falling back
@@ -155,7 +158,7 @@ p50 711 ms / p90 990 ms, plan p50 2.3 s / p90 4.7 s, 0 ungrounded numbers.
 >
 > **Quiet by default.** At most 3 characters speak per event, there are quiet hours and a daily message cap, and
 > everything else waits for one evening recap. Only a real emergency (a shortfall within 48 hours) breaks through,
-> and it ends in a phone call only if you haven't answered.
+> and it ends in a phone call only if the money still hasn't moved.
 >
 > **Never asks for secrets.** The agents never ask for passwords, one-time codes, or account numbers.
 >

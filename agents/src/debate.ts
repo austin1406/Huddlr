@@ -119,9 +119,11 @@ async function hadRecentShortfall(db: Queryable, phone: string, now: Date): Prom
   return r.rows.length > 0;
 }
 
-const situation = (id: CharacterId, event: FinanceEvent) =>
+const situation = (id: CharacterId, event: FinanceEvent, hasPlan = true) =>
   id === "coach"
-    ? `The accounts just explained what this means for them: ${event.type}. Close with the plan.`
+    ? hasPlan
+      ? `The accounts just explained what this means for them: ${event.type}. Close with the bottom line and the plan.`
+      : `The accounts just explained what this means for them: ${event.type} ${JSON.stringify(event.data)}. There's no plan to approve. Give the bottom line: what this means for the user and whether they need to do anything now (usually nothing). Start with "Bottom line:". Don't ask them to reply YES.`
     : `This just happened: ${event.type} ${JSON.stringify(event.data)}. Explain what it means for the user from your account's side, with one number. If you see it differently from another account, say so briefly and calmly.`;
 
 export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<DebateResult> {
@@ -209,7 +211,7 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
 
   if (coachPrep) {
     const { plan, ask, proposalId } = await coachPrep;
-    const line = await speak("coach", facts, situation("coach", event), {
+    const line = await speak("coach", facts, situation("coach", event, plan != null), {
       event, plan, ask: ask?.actionText ?? null, heard, model: deps.model, deadline: started + config.debate.plan_target_ms,
     });
     await queue("coach", line.text, proposalId);
@@ -314,7 +316,7 @@ export async function runWindfall(
     });
   else if (plan && !main && keep > 0)
     // Everything stays in Checking: nothing to move, so nothing to say YES to.
-    line = { text: `Keep the whole ${usd(ask.amount)} in Checking for now${facts.shortfall ? `: you'd be short ${usd(facts.shortfall.amount)} before payday, and this covers it` : ""}. Nothing to move, so no YES needed.` };
+    line = { text: `Keep the whole ${usd(ask.amount)} in Checking for now${facts.shortfall ? `: you'd be short ${usd(facts.shortfall.amount)} before payday, and this covers it` : ""}. Nothing to move.` };
   else
     // No new proposal could be made: never invite a YES here, it could approve something else.
     line = { text: `Good problem to have. I couldn't build a plan for the ${usd(ask.amount)} right now. Text me again in a minute and the crew will weigh in.` };

@@ -66,7 +66,7 @@ async function setup(planOverride?: Plan) {
   const now = new Date((await real.facts()).asOf);
   const proposals = makeProposalService(db, () => now);
   let n = 0;
-  const model = async () => "Here's the plan. Reply YES to: Move $450.00 from Checking to Card.";
+  const model = async () => "Bottom line: pay down the card. Move $450.00 from Checking to Card in your bank app.";
   const chat = async (text: string) => {
     const id = Number((await db.query<{ id: number }>(
       "INSERT INTO inbound_messages (provider_msg_id, user_phone, text, received_sim_at) VALUES ($1, $2, $3, $4) RETURNING id", [`m${++n}`, PHONE, text, now],
@@ -88,7 +88,7 @@ test("phone test: 'prioritize my ira over savings' is saved, confirmed, and the 
   assert.equal(r.responder, "coach");
   const m = await last();
   assert.match(m.text, /^Got it: IRA comes before Savings when there's money to place\. A shortfall in Checking still gets covered first/);
-  assert.match(m.text, /Your plan already starts there\. Reply YES to: Move \$150\.00 from Checking to IRA\.$/);
+  assert.match(m.text, /Your plan already starts there: Move \$150\.00 from Checking to IRA in your bank app\.$/);
   assert.deepEqual(await loadPriorities(db, PHONE), { first: ["ira"], last: ["savings"], protect: [] });
 });
 
@@ -100,7 +100,7 @@ test("'pay off the card first' re-points the waiting plan: the YES now moves mon
   const after = await proposals.getPending(PHONE);
   assert.equal(after?.actionText, "Move $450.00 from Checking to Card");
   assert.notEqual(after?.id, before?.id, "a new plan replaces the old one, so the old YES can't approve it");
-  assert.match((await last()).text, /I've updated the plan\. Reply YES to: Move \$450\.00 from Checking to Card\.$/);
+  assert.match((await last()).text, /I've updated the plan: Move \$450\.00 from Checking to Card in your bank app\.$/);
 });
 
 test("priorities carry into the next plan and are sent to P1's planner", async () => {
@@ -115,7 +115,7 @@ test("a priority the waiting plan has no money for is saved for next time, hones
   const { chat, last } = await setup(phonePlan);
   await chat("I got a $600 bonus, what should I do?");
   await chat("focus on savings");
-  assert.match((await last()).text, /doesn't put anything in Savings; it goes first next time there's money to place\. Still waiting on your YES: Move \$150\.00 from Checking to IRA\./);
+  assert.match((await last()).text, /doesn't put anything in Savings; it goes first next time there's money to place\. Still to do: Move \$150\.00 from Checking to IRA in your bank app\./);
 });
 
 test("account summary: every account, priorities and the waiting plan, built in code", async () => {
@@ -131,7 +131,7 @@ test("account summary: every account, priorities and the waiting plan, built in 
   assert.equal(text.split("\n")[0], "Here's where you stand:");
   for (const line of [/🏦 Checking: \$1,186\.50, with \$437\.50 safe to spend until payday on Nov 20\./, /🐷 Savings: \$900\.00, enough to cover about 2 weeks of must-pay bills if your income stopped\./,
     /💳 Card: \$2,400\.00 owed at 24% APR, about \$48\.00 a month in interest\./, /🚗 Car Loan: \$14,500\.00 owed, \$320\.00 a month\./,
-    /🌱 IRA: \$8,200\.00, with \$150\.00 of employer match still unclaimed\./, /Your priorities: IRA first; Savings last\./, /Waiting on your YES: Move \$150\.00 from Checking to IRA\./])
+    /🌱 IRA: \$8,200\.00, with \$150\.00 of employer match still unclaimed\./, /Your priorities: IRA first; Savings last\./, /Still to do: Move \$150\.00 from Checking to IRA in your bank app\./])
     assert.match(text, line);
 });
 

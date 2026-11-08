@@ -49,7 +49,7 @@ test("no answer: reminder at 60 min, then at 90 min a call_requests row for P4 p
 
   jump(60 * MIN);
   assert.deepEqual((await tick()).map((r) => r.outcome), ["reminded"]);
-  assert.match((await outbox()).at(-1)!.text, /still need a YES to: Move \$143\.00 from Savings to Checking/);
+  assert.match((await outbox()).at(-1)!.text, /still to do, move \$143\.00 from Savings to Checking in your bank app/);
 
   jump(30 * MIN);
   assert.deepEqual((await tick()).map((r) => r.outcome), ["called"]);

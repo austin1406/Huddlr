@@ -29,16 +29,19 @@ export function isEmergency(event: FinanceEvent, facts?: FactsSnapshot): boolean
   return event.type === "forecast_problem" && (event.severity === "high" || facts?.shortfall?.within48Hours === true);
 }
 
-/** Who speaks: the account the event touched first, then other interested accounts, Coach last. Max 3 total. */
+/**
+ * Who speaks: the account the event touched first, then other interested accounts, Coach last. Max 3 total.
+ * The Coach always closes when accounts speak, so every group reply ends with a bottom line (with a plan to say
+ * YES to on plan events, or "nothing to do" otherwise). Product testing: facts with no conclusion confused people.
+ */
 export function pickSpeakers(event: FinanceEvent): CharacterId[] {
   const max: number = config.moderator.max_speakers_per_event;
-  const withCoach = PLAN_EVENTS.has(event.type) && config.moderator.coach_always_speaks_when_plan;
   const accounts = cast.filter((c) => c.id !== "coach");
   const owner = accounts.find((c) => c.account === event.accountId);
   const interested = accounts.filter((c) => c !== owner && c.speaks_on.includes(event.type));
   const picked = [owner, ...interested].filter((c): c is (typeof accounts)[number] => !!c).map((c) => c.id);
-  const room = withCoach ? max - 1 : max;
-  return [...picked.slice(0, room), ...(withCoach ? (["coach"] as CharacterId[]) : [])];
+  if (!picked.length) return [];
+  return [...picked.slice(0, max - 1), "coach"];
 }
 
 export function decide(event: FinanceEvent, ctx: ModeratorContext): Decision {
