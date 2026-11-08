@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import pg from "pg";
-import { loadChat, loadFacts, loadOutboxStats, loadProposals, maskPhone, type Db } from "./state.js";
+import { loadChat, loadFacts, loadOutboxStats, loadProjection, loadProposals, maskPhone, parseWindow, type Db } from "./state.js";
 import { loadSim, runControl, type ControlDeps } from "./control.js";
 import { cancelOlderLinks, checkCode, endSession, linksValidFrom, migrateAuth, newCode, newSession, queueCode, sessionPhone, SESSION_TTL_MS } from "./auth.js";
 import { buildHuddle, decide, parseDecision, signLink, understand, verifyLink, type Decision } from "./huddle.js";
@@ -128,6 +128,16 @@ app.get("/me/:token/api", async (c) => {
     ? await db.query<{ agent_handle: string | null }>(`SELECT agent_handle FROM p3_photon_spaces WHERE user_phone = $1`, [g.phone]).catch(() => ({ rows: [] }))
     : { rows: [] };
   return c.json({ huddle: buildHuddle(facts, cast), source, agentHandle: agent.rows[0]?.agent_handle ?? null });
+});
+
+// "Where this is heading": every account over a window the person picks. The numbers come from P1's projection.
+app.post("/me/:token/api/project", async (c) => {
+  const g = await gate(c);
+  if (g instanceof Response) return g;
+  const win = parseWindow(await c.req.json().catch(() => null));
+  if (!win) return c.json({ error: "Pick a whole number of days, weeks, months or years (up to 10 years)." }, 400);
+  const { projection, source, exact } = await loadProjection(env.financeUrl, env.secret, env.fixture, win);
+  return c.json({ projection, source, exact });
 });
 
 const whatIf = async (scenario: unknown) => {
