@@ -56,6 +56,8 @@ export interface LedgerState {
   sourceSeen?: Record<string, true>;
   /** True once the first look at the transaction log has been recorded as history. */
   sourceBaselined?: boolean;
+  /** Purchases the transaction log already held at first sight: what everyday spending looked like before the ledger began. */
+  history?: { date: string; amount: number; description: string }[];
 }
 
 /** What the engine can be told to start from, for demos and tests. */
