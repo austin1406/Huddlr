@@ -13,6 +13,7 @@ import {
 } from "../../contracts/src";
 import type { Queryable } from "./db";
 import { queueOutbox } from "./outbox";
+import { geminiQuota } from "./quota";
 import type { makeProposalService } from "./proposals";
 
 type Service = ReturnType<typeof makeProposalService>;
@@ -48,7 +49,8 @@ export function createApp(opts: { db: Queryable; proposals: Service; secret: str
 
   app.get(p.health.path, async (c) => {
     const dbOk = await db.query("SELECT 1").then(() => true, () => false);
-    return c.json({ ok: dbOk, service: "agents" }, dbOk ? 200 : 503);
+    // Gemini being rate-limited is not a health failure (templates keep working), so it doesn't change the status code.
+    return c.json({ ok: dbOk, service: "agents", gemini: geminiQuota.status() }, dbOk ? 200 : 503);
   });
 
   app.use("*", async (c, next) => {

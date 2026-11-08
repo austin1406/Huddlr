@@ -89,3 +89,20 @@ On the first start (or after `/agents/reset`) the agents skip the existing event
 
 `/opt/huddlr/agents/deploy/deploy.sh` — pulls main, installs, (re)starts `agents` under pm2, checks `/agents/health`.
 Needs `DATABASE_URL`, `HUDDLR_SECRET`, `DEMO_USER_PHONE`, `GEMINI_API_KEY` in `/opt/huddlr/.env`.
+
+## Gate 1 and reset
+
+```bash
+npm run gate1                          # 30 scripted runs + quiet hours, cap, emergency, duplicates, 2-day clock test, reset, transfer ack (fake model, no quota)
+npm run gate1 -- --real --runs 6       # same with real Gemini, paced for the free tier
+npm run reset                          # reset-agents against the running service (AGENTS_URL, else PUBLIC_BASE_URL)
+```
+
+`npm test` (and CI) runs Gate 1 with the fake model, which invents a number in every other reply, so a grounding regression fails the build.
+Last real run: 20 messages, 0 ungrounded numbers, median 557 ms to the first message.
+
+## Is Gemini rate-limited right now?
+
+- `npm run gemini-status` — one tiny call: OK, per-minute limit (with wait), daily limit used up (resets midnight Pacific), or no credits.
+- The running service logs one line when the limit hits and one when it clears, and `GET /agents/health` includes
+  `gemini: { ok, scope, limitedUntil, hitsToday }`. While limited, characters skip the call and send grounded templates at once.
