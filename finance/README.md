@@ -12,7 +12,7 @@ Owner: Austin Santhakumar (@austin1406), P1
 
 ## The engine (default)
 
-The engine runs Maya's persona as a simulated customer. Nothing is faked per request: it keeps a ledger, and every answer is computed from it.
+The engine runs Sreyas's persona as a simulated customer. Nothing is faked per request: it keeps a ledger, and every answer is computed from it.
 
 - **Forecast:** 45 days from today. Each day: paycheck if payday, bills due, then the average daily spend; record the end-of-day balance. Safe to spend = lowest balance before the next payday minus the $100 cushion.
 - **Indicators:** runway, credit utilization, savings rate, bill reliability, retirement on track, each with the raw numbers and thresholds from `contracts/thresholds.json`.
@@ -34,7 +34,7 @@ npm run post-paycheck                                          # lands a paychec
 npm run post-bill -- Vet 220 --in-days 1                       # or --date 2026-12-05, --nonessential
 npm run jump-days -- 21                                        # fast-forward the simulated clock
 npm run demo-mode -- on
-npm run scenario -- shortfall                                  # resets, then Maya has $33 and a $143 gap opens
+npm run scenario -- shortfall                                  # resets, then Sreyas has $33 and a $143 gap opens
 npm run reset                                                  # everything back to the start, clock and demo mode too
 npm run state                                                  # balances, clock, recent transactions
 ```
