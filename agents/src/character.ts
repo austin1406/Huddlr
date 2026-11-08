@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import type { Account, CharacterId, FactsSnapshot, FinanceEvent, IndicatorId, Plan } from "../../contracts/src";
 import { checkMessage } from "./checker";
+import { geminiQuota, parseQuotaError, QuotaError } from "./quota";
 
 const contractsDir = new URL("../../contracts/", import.meta.url);
 
@@ -131,7 +132,13 @@ export async function callModel(prompt: string, opts: { model: string; apiKey: s
     }),
     signal: AbortSignal.timeout(opts.timeoutMs),
   });
+  if (res.status === 429) {
+    const err = parseQuotaError(await res.text());
+    geminiQuota.record(err);
+    throw err;
+  }
   if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  geminiQuota.ok();
   const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
   return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
 }
@@ -170,6 +177,10 @@ export async function speak(
 
   for (const source of ["model", "retry"] as const) {
     if (source === "retry" && deadline - Date.now() < config.debate.checker_retry_only_if_ms_remaining) break;
+    if (!opts.model && geminiQuota.limited()) {
+      attempts.push({ error: `skipped: Gemini ${geminiQuota.status().scope ?? ""} limit` });
+      break;
+    }
     try {
       const text = await model(prompt);
       // Checked against this character's own slice, not all 45 forecast days, so stray numbers can't sneak through.
@@ -178,7 +189,8 @@ export async function speak(
       if (check.ok && text) return { text, source, attempts, ms: Date.now() - started };
       prompt += `\nYour last reply used numbers not in FACTS: ${check.ungrounded.map((u) => u.raw).join(", ")}. Rewrite without them.`;
     } catch (err) {
-      attempts.push({ error: String((err as Error).message ?? err) });
+      attempts.push({ error: err instanceof QuotaError ? `quota (${err.scope})` : String((err as Error).message ?? err) });
+      if (err instanceof QuotaError) break; // a retry would hit the same limit
     }
   }
   return { text: template(id, facts, opts.plan, opts.ask), source: "template", attempts, ms: Date.now() - started };

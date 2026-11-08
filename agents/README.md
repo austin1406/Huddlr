@@ -100,3 +100,9 @@ npm run reset                          # reset-agents against the running servic
 
 `npm test` (and CI) runs Gate 1 with the fake model, which invents a number in every other reply, so a grounding regression fails the build.
 Last real run: 20 messages, 0 ungrounded numbers, median 557 ms to the first message.
+
+## Is Gemini rate-limited right now?
+
+- `npm run gemini-status` — one tiny call: OK, per-minute limit (with wait), daily limit used up (resets midnight Pacific), or no credits.
+- The running service logs one line when the limit hits and one when it clears, and `GET /agents/health` includes
+  `gemini: { ok, scope, limitedUntil, hitsToday }`. While limited, characters skip the call and send grounded templates at once.
