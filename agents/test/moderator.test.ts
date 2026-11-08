@@ -18,12 +18,12 @@ const ctx = (over: Partial<ModeratorContext> = {}): ModeratorContext => ({
   now: afternoon, timezone: "America/Chicago", demoMode: false, proactiveSentToday: 0, alreadyHandled: false, facts, ...over,
 });
 
-test("relevance: account owner first, at most 3 speakers, Coach last on plan events", () => {
+test("relevance: account owner first, up to 3 accounts, Coach always last", () => {
   const s = pickSpeakers(ev("big_purchase"));
-  assert.ok(s.length <= 3);
+  assert.ok(s.length <= 4);
   assert.equal(s[0], ev("big_purchase").accountId);
   assert.equal(s.at(-1), "coach");
-  for (const e of events) assert.ok(pickSpeakers(e).length <= 3, e.type);
+  for (const e of events) assert.ok(pickSpeakers(e).filter((x) => x !== "coach").length <= 3, e.type);
 });
 
 test("quiet hours send to digest, demo mode bypasses them", () => {

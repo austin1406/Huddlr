@@ -69,10 +69,10 @@ test("spots windfall questions with one amount", () => {
 test("'$600 bonus, what should I do?' -> two accounts debate, the Coach closes with a plan to say YES to", async () => {
   const { chat, outbox, proposals, finance, facts, db } = await setup();
   const r = await chat("I got a $600 bonus, what should I do?");
-  assert.equal(r.debate?.length, 3, `speakers: ${r.debate}`);
+  assert.equal(r.debate?.length, 4, `speakers: ${r.debate}`);
 
   const sent = await outbox();
-  assert.equal(sent.length, 4, "Coach opener, two accounts, Coach plan");
+  assert.equal(sent.length, 5, "Coach opener, three accounts with their options, Coach bottom line");
   assert.equal(sent[0].speaker, "coach", "the Coach answers the question first");
   assert.match(sent[0].text, new RegExp(`^Good question\\. ${r.debate![0].replace("car_loan", "Car Loan")}`, "i"));
   assert.match(sent[0].text, /weigh in, then my plan\.$/);
@@ -131,7 +131,7 @@ test("bare amounts count when a windfall word makes it clear", () => {
 test("bonus while short: keep part in Checking, the YES moves the rest OUT of Checking (never 'from Savings')", async () => {
   const { chat, outbox, proposals } = await setup("shortfall");
   const r = await chat("I got a $600 bonus. What should I do with it?");
-  assert.deepEqual(r.debate, ["card", "checking", "coach"], "where the money goes, plus Checking (it keeps some)");
+  assert.deepEqual(r.debate, ["card", "checking", "savings", "coach"], "where the money goes, Checking (it keeps some), and Savings' option");
 
   const pending = await proposals.getPending(PHONE);
   assert.equal(pending?.actionText, "Move $457.00 from Checking to Card");

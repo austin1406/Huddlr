@@ -1,6 +1,6 @@
 # Agents (P2) runbook
 
-The cast (Checking, Savings, Card, Car Loan, IRA, Coach), the moderator, the number checker, proposals, memory,
+The cast (Checking, Savings, Card, Loan, IRA, Coach), the moderator, the number checker, proposals, memory,
 follow-ups, and escalation. Code in `agents/`, shapes in `contracts/src/agents.ts`, tables in `contracts/p2_agents.sql`.
 
 **The rule everything is built around:** every number a character says comes from P1's finance engine. Gemini only
@@ -80,6 +80,10 @@ finance isn't on localhost:4000).
 
 ## How a multi-character reply reads
 
+"So what should I do?" gets the same shape: the Coach names who's weighing in, each account with a stake (the plan's
+accounts first) gives its option, and the Coach closes with the code-built bottom line.
+
+
 1. The Coach answers the question first (reply to the user's text) and says who's speaking: "Good question. Card and
    Checking weigh in, then my plan."
 2. Each account explains, in turn, one number and what it means for the user ("that costs you $48.00 a month in
@@ -91,6 +95,14 @@ finance isn't on localhost:4000).
 
 A phone's first text ever gets the Coach's welcome first ("Meet your money: 🏦 Checking, 🐷 Savings, …"), built from
 `contracts/cast.json`, once per phone (again after a reset).
+
+## Loan
+
+The Loan character (🧾, id `car_loan` in the contracts) covers any loan: `@loan`, `@student loan`, `@mortgage`,
+`@car loan` all reach it. It breaks the loan down, computed in code from P1's balance, APR and payment: this month's
+payment split into interest and principal, months to payoff and the payoff month, interest still to pay, and what an
+extra $100 a month would save. Standard amortization estimates ("about"): P1's engine doesn't accrue loan interest.
+P3's dashboard still labels it "🚗 Car Loan" (its own hard-coded map, `dashboard/public/index.html`).
 
 ## Talking to one character, and celebrations
 
@@ -121,7 +133,7 @@ starting a new one. Replay the phone conversation with real Gemini: `npx tsx scr
 ## Rules that are tested
 
 - 0 ungrounded numbers: Gate 1 (30 runs) runs in CI with a test model that invents a number in every other reply.
-- At most 3 speakers per event, Coach last. Quiet hours 22:00–08:00 and a cap of 6 proactive messages a day
+- Up to 3 accounts per event (each gives its option), then the Coach's bottom line. Quiet hours 22:00–08:00 and a cap of 8 proactive messages a day
   (`demo_mode` lifts both). Emergencies ignore both.
 - The Coach never asks for a YES: it says "Bottom line: … in your bank app." and the plan is checked off when P1's
   watcher sees the transfer (reminder at 60 min; for a shortfall, a call at 90 min if the money hasn't moved). A YES

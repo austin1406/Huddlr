@@ -4,7 +4,7 @@ import type { FactsSnapshot, Plan, PlanLine } from "../../contracts/src";
 
 const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const day = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-const NAME: Record<string, string> = { checking: "Checking", savings: "Savings", card: "your card", car_loan: "your car loan", ira: "your IRA" };
+const NAME: Record<string, string> = { checking: "Checking", savings: "Savings", card: "your card", car_loan: "your loan", ira: "your IRA" };
 
 /** Why a plan line matters, in one plain sentence, using only that line's own numbers. */
 export function whyLine(l: PlanLine): string {

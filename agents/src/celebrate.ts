@@ -46,7 +46,7 @@ export function celebration(event: FinanceEvent, facts: FactsSnapshot, recentSho
       const owed = balance(facts, "car_loan");
       return {
         speaker: "car_loan",
-        text: `Extra ${usd(amount)} toward the car.${owed != null ? ` ${usd(owed)} left to go.` : ""} Every extra payment shortens the road.`,
+        text: `Extra ${usd(amount)} toward your loan.${owed != null ? ` ${usd(owed)} left to go.` : ""} Every extra payment shortens the loan and cuts the interest.`,
       };
     }
     case "ira":

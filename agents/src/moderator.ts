@@ -30,18 +30,18 @@ export function isEmergency(event: FinanceEvent, facts?: FactsSnapshot): boolean
 }
 
 /**
- * Who speaks: the account the event touched first, then other interested accounts, Coach last. Max 3 total.
- * The Coach always closes when accounts speak, so every group reply ends with a bottom line (with a plan to say
- * YES to on plan events, or "nothing to do" otherwise). Product testing: facts with no conclusion confused people.
+ * Who speaks: the account the event touched first, then other interested accounts (up to 3, each giving its
+ * option), and the Coach last with the bottom line. Product testing: people want every account's option, and a
+ * clear conclusion at the end.
  */
 export function pickSpeakers(event: FinanceEvent): CharacterId[] {
-  const max: number = config.moderator.max_speakers_per_event;
+  const maxAccounts: number = config.moderator.max_accounts_per_event ?? config.moderator.max_speakers_per_event - 1;
   const accounts = cast.filter((c) => c.id !== "coach");
   const owner = accounts.find((c) => c.account === event.accountId);
   const interested = accounts.filter((c) => c !== owner && c.speaks_on.includes(event.type));
   const picked = [owner, ...interested].filter((c): c is (typeof accounts)[number] => !!c).map((c) => c.id);
   if (!picked.length) return [];
-  return [...picked.slice(0, max - 1), "coach"];
+  return [...picked.slice(0, maxAccounts), "coach"];
 }
 
 export function decide(event: FinanceEvent, ctx: ModeratorContext): Decision {

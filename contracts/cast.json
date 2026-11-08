@@ -58,10 +58,10 @@
     },
     {
       "id": "car_loan",
-      "name": "Car Loan",
-      "emoji": "🚗",
+      "name": "Loan",
+      "emoji": "🧾",
       "account": "car_loan",
-      "voice": "Steady and dry. Keeps the monthly payment front of mind.",
+      "voice": "Steady and clear. Explains loans in plain words: what you owe, the rate, and when it's paid off.",
       "cares_about": [
         "loan_payment",
         "loan_due_date",
@@ -71,7 +71,7 @@
         "bill_due_soon",
         "forecast_problem"
       ],
-      "wants": "Explain the monthly payment, what's still owed, and whether the payment is covered."
+      "wants": "Explain the loan: what's owed, the interest rate, how each payment splits between interest and what you owe, and when it's paid off. Mention what extra payments would save."
     },
     {
       "id": "ira",

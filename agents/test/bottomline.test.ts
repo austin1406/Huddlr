@@ -74,7 +74,7 @@ test("every debate ends with the Coach, plan or not", () => {
   for (const type of ["bill_due_soon", "big_purchase", "paycheck_landed", "forecast_problem"] as const) {
     const s = pickSpeakers(ev(type));
     assert.equal(s.at(-1), "coach", type);
-    assert.ok(s.length <= 3, type);
+    assert.ok(s.length <= 4, `${type}: up to 3 accounts plus the Coach`);
   }
 });
 
@@ -101,4 +101,31 @@ test("bill due soon (no plan): accounts explain, the Coach closes with a bottom 
 test("the Coach's pre-written plan line leads with the bottom line too", () => {
   const t = planTemplate(paycheckPlan, "Move $150.00 from Checking to IRA");
   assert.match(t, /^Bottom line: \$150\.00 to IRA to grab the free employer match\. The plan also suggests \$1,161\.50 to Card for later\. Move \$150\.00 from Checking to IRA in your bank app\.$/);
+});
+
+test("'so what should i do' with the roundtable: every account in the plan gives its option, then the Coach's bottom line", async () => {
+  const { runOptions } = await import("../src/debate");
+  const db = new PGlite();
+  await migrate(db);
+  const f = await finance();
+  const now = new Date((await f.facts()).asOf);
+  const proposals = makeProposalService(db, () => now);
+  await proposals.create({ userPhone: PHONE, plan: paycheckPlan, from: "checking", to: "ira", amount: 150, actionText: "Move $150.00 from Checking to IRA", sourceEventId: "evt_paycheck_landed_x" });
+  const id = Number((await db.query<{ id: number }>("INSERT INTO inbound_messages (provider_msg_id, user_phone, text, received_sim_at) VALUES ('a', $1, 'so what should i do', $2) RETURNING id", [PHONE, now])).rows[0].id);
+  const prompts: string[] = [];
+  const model = async (p: string) => { prompts.push(p); return p.startsWith("You are IRA") ? "Option: put $150.00 into the IRA; that claims the full match." : "Option: put $1,161.50 toward the card; that saves $23.23 a month."; };
+  const r = await handleChat({
+    db, facts: () => f.facts(), userPhone: PHONE, finance: f, proposals, model,
+    options: (ask, t) => runOptions({ db, finance: f, proposals, userPhone: PHONE, model }, ask, t),
+  }, { id, text: "so what should i do" }, now);
+  assert.deepEqual(r.debate, ["ira", "card", "savings", "coach"], "the plan's accounts first, then others with a stake");
+  const rows = (await db.query<{ speaker: string; text: string; reply_to: number | null }>("SELECT speaker, text, reply_to FROM outbox ORDER BY id")).rows;
+  assert.deepEqual(rows.map((x) => x.speaker), ["coach", "ira", "card", "savings", "coach"]);
+  assert.equal(rows[0].text, "Good question. IRA, Card and Savings each give an option, then my bottom line.");
+  assert.match(rows[1].text, /^Option: put \$150\.00 into the IRA/);
+  assert.match(rows.at(-1)!.text, /^Bottom line: move \$150\.00 from Checking to IRA in your bank app\./);
+  assert.ok(rows.every((x) => Number(x.reply_to) === id), "all threaded under the question");
+  assert.match(prompts[0], /The plan sends \$150\.00 to IRA/);
+  assert.match(prompts[0], /Give the user your option/);
+  assert.equal((await proposals.getPending(PHONE))?.status, "pending", "options never approve anything");
 });
