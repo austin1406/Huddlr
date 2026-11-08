@@ -1,7 +1,7 @@
 import type { AccountId, Persona } from "../../../contracts/src";
 import { addDays, billDueOn, daysBetween, isPayday, morningOf, r2 } from "./calendar";
 
-export type TxnKind = "purchase" | "paycheck" | "bill" | "transfer" | "daily";
+export type TxnKind = "purchase" | "paycheck" | "bill" | "transfer" | "daily" | "deposit" | "withdrawal";
 
 /** One money movement. `date` is the customer's local day, `occurredAt` the instant. Ids are stable, never time-based. */
 export interface Txn {
@@ -52,6 +52,10 @@ export interface LedgerState {
    * A transfer with no entry has not been resolved yet (the agents service did not answer) and is retried.
    */
   completed?: Record<string, string | null>;
+  /** Transaction-log records already accounted for (history at first sight, or applied since). */
+  sourceSeen?: Record<string, true>;
+  /** True once the first look at the transaction log has been recorded as history. */
+  sourceBaselined?: boolean;
 }
 
 /** What the engine can be told to start from, for demos and tests. */
@@ -135,7 +139,13 @@ export function settleThrough(state: LedgerState, persona: Persona, today: strin
   return created;
 }
 
-export interface PurchaseInput {
+/** Optional overrides when a record comes from the transaction log: its own id and date. */
+export interface Origin {
+  id?: string;
+  date?: string;
+}
+
+export interface PurchaseInput extends Origin {
   amount: number;
   merchant?: string;
   category?: string;
@@ -148,30 +158,43 @@ export function postPurchase(state: LedgerState, today: string, nowIso: string, 
   const amount = r2(input.amount);
   if (account === "card") state.balances.card = r2(state.balances.card + amount);
   else state.balances.checking = r2(state.balances.checking - amount);
-  return push(state, { date: today, occurredAt: nowIso, kind: "purchase", amount, accountId: account, merchant: input.merchant ?? "Purchase", category: input.category ?? "shopping" }, "sim-purchase");
+  return push(state, { id: input.id, date: input.date ?? today, occurredAt: nowIso, kind: "purchase", amount, accountId: account, merchant: input.merchant ?? "Purchase", category: input.category ?? "shopping" }, "sim-purchase");
 }
 
-export function postTransfer(state: LedgerState, today: string, nowIso: string, from: AccountId, to: AccountId, amount: number): Txn {
+export function postTransfer(state: LedgerState, today: string, nowIso: string, from: AccountId, to: AccountId, amount: number, origin: Origin = {}): Txn {
   const cents = r2(amount);
   state.balances[from] = r2(state.balances[from] - cents);
   state.balances[to] = r2(state.balances[to] + cents);
-  return push(state, { date: today, occurredAt: nowIso, kind: "transfer", amount: cents, accountId: to, from, to }, "sim-transfer");
+  return push(state, { id: origin.id, date: origin.date ?? today, occurredAt: nowIso, kind: "transfer", amount: cents, accountId: to, from, to }, "sim-transfer");
 }
 
 /**
  * Lands a paycheck now and restarts the biweekly schedule from today, so the next one is
  * `everyDays` later. Settling never double-counts today because settled days end yesterday.
  */
-export function postPaycheck(state: LedgerState, today: string, nowIso: string, amount?: number): Txn {
+export function postPaycheck(state: LedgerState, today: string, nowIso: string, amount?: number, origin: Origin = {}): Txn {
   const cents = r2(amount ?? state.paycheckAmount);
   state.balances.checking = r2(state.balances.checking + cents);
   state.lastPaid = today;
-  return push(state, { date: today, occurredAt: nowIso, kind: "paycheck", amount: cents, accountId: "checking", label: "Paycheck" }, "sim-paycheck-now");
+  return push(state, { id: origin.id, date: origin.date ?? today, occurredAt: nowIso, kind: "paycheck", amount: cents, accountId: "checking", label: "Paycheck" }, "sim-paycheck-now");
 }
 
-export function postBill(state: LedgerState, input: { label: string; amount: number; dueDate: string; essential?: boolean }): OneOffBill {
+/** Money into checking that is not a paycheck (a gift, a refund): changes the balance and income, raises no event. */
+export function postDeposit(state: LedgerState, today: string, nowIso: string, amount: number, label: string, origin: Origin = {}): Txn {
+  const cents = r2(amount);
+  state.balances.checking = r2(state.balances.checking + cents);
+  return push(state, { id: origin.id, date: origin.date ?? today, occurredAt: nowIso, kind: "deposit", amount: cents, accountId: "checking", label }, "sim-deposit");
+}
+
+export function postWithdrawal(state: LedgerState, today: string, nowIso: string, amount: number, label: string, origin: Origin = {}): Txn {
+  const cents = r2(amount);
+  state.balances.checking = r2(state.balances.checking - cents);
+  return push(state, { id: origin.id, date: origin.date ?? today, occurredAt: nowIso, kind: "withdrawal", amount: cents, accountId: "checking", label }, "sim-withdrawal");
+}
+
+export function postBill(state: LedgerState, input: { label: string; amount: number; dueDate: string; essential?: boolean; id?: string }): OneOffBill {
   const bill: OneOffBill = {
-    id: `oneoff-${String(state.nextSeq++).padStart(4, "0")}`,
+    id: input.id ?? `oneoff-${String(state.nextSeq++).padStart(4, "0")}`,
     label: input.label,
     amount: r2(input.amount),
     dueDate: input.dueDate,
@@ -186,8 +209,8 @@ export function postBill(state: LedgerState, input: { label: string; amount: num
 export function last30Days(state: LedgerState, persona: Persona, today: string): { income: number; spending: number } {
   const since = addDays(today, -29);
   const window = state.txns.filter((t) => t.date >= since && t.date <= today);
-  const income = window.filter((t) => t.kind === "paycheck").reduce((s, t) => s + t.amount, 0);
-  const spending = window.filter((t) => t.kind === "purchase" || t.kind === "daily" || t.kind === "bill").reduce((s, t) => s + t.amount, 0);
+  const income = window.filter((t) => t.kind === "paycheck" || t.kind === "deposit").reduce((s, t) => s + t.amount, 0);
+  const spending = window.filter((t) => t.kind === "purchase" || t.kind === "daily" || t.kind === "bill" || t.kind === "withdrawal").reduce((s, t) => s + t.amount, 0);
   const baseline = Math.max(0, 30 - daysBetween(state.createdDate, today)) / 30;
   return {
     income: r2(persona.spending.last30Days.income * baseline + income),

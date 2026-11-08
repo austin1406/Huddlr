@@ -14,6 +14,12 @@ export const env = {
   mode: (process.env.FINANCE_MODE === "stub" ? "stub" : "engine") as "stub" | "engine",
   /** Stub only: which fixture to serve first. Switch live with POST /admin/scenario. */
   scenario: (process.env.FINANCE_SCENARIO === "shortfall" ? "shortfall" : "normal") as ScenarioName,
+  /** persona: the engine runs on the persona alone. nessie: Nessie is also the transaction log (see docs/nessie.md). */
+  dataSource: (process.env.DATA_SOURCE === "nessie" ? "nessie" : "persona") as "persona" | "nessie",
+  nessieKey: process.env.NESSIE_API_KEY || "",
+  nessieBaseUrl: process.env.NESSIE_BASE_URL || "https://api.nessieisreal.com",
+  /** "First Last" of the Nessie customer to follow. Defaults to the persona's name. */
+  nessieCustomer: process.env.NESSIE_CUSTOMER || "",
   /** Shared Postgres. Holds the sim_state row the other services read. Without it the clock is kept in a local file. */
   databaseUrl: process.env.DATABASE_URL || "",
   /** Where get_pending_proposal and accept_proposal are forwarded (the agents service, Caddy path /agents). */

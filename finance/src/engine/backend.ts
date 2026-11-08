@@ -8,7 +8,8 @@ import { canIAfford } from "./afford";
 import { addDays, r2 } from "./calendar";
 import { EventLog, detectEvents } from "./events";
 import { buildFacts } from "./facts";
-import { createLedger, postBill, postPaycheck, postPurchase, postTransfer, settleThrough, type LedgerOverrides, type LedgerState, type Txn } from "./ledger";
+import type { SourceTxn, TxnSource } from "../nessie/source";
+import { createLedger, postBill, postDeposit, postPaycheck, postPurchase, postTransfer, postWithdrawal, settleThrough, type LedgerOverrides, type LedgerState, type Txn } from "./ledger";
 import { planV0 } from "./plan";
 import { whatIf } from "./whatif";
 
@@ -25,7 +26,17 @@ export interface EngineOptions {
   /** JSON file that keeps the ledger and event log across restarts. Omit for in-memory (tests). */
   dataFile?: string;
   realNow?: () => number;
+  /** The transaction log (Nessie). Without one the engine runs on the persona alone. */
+  source?: TxnSource;
+  /** Why a configured source is not in use, shown in /health. */
+  sourceError?: string;
 }
+
+/** How often the transaction log is read, in real milliseconds. */
+export const SOURCE_POLL_MS = 30_000;
+
+const PAYCHECK = /pay(check|roll)|salary|direct dep/i;
+const ROUTE = /(checking|savings|card|car_loan|ira)\s*->\s*(checking|savings|card|car_loan|ira)/i;
 
 const SHORTFALL_START: LedgerOverrides = { checking: 33, lastPaidDaysAgo: 12 };
 
@@ -100,8 +111,8 @@ export class EngineBackend implements Backend, EngineOps {
     const persona = this.o.persona;
     const today = localDate(now, persona.customer.timezone);
     settleThrough(this.ledger, persona, today);
+    let changed = await this.pollSource(today, now.toISOString());
     const bare = buildFacts(this.ledger, persona, now);
-    let changed = false;
     for (const e of detectEvents(this.ledger, persona, bare)) {
       if (this.log.has(e.id)) continue;
       if (e.type === "user_transfer_seen") {
@@ -138,6 +149,91 @@ export class EngineBackend implements Backend, EngineOps {
     }
   }
 
+  private lastPollAt = 0;
+  private lastSourceError: string | undefined;
+
+  /**
+   * Reads the transaction log. The first successful read is recorded as history and applies nothing. After that,
+   * any record id not seen before is new and is applied to the ledger. New items are found by id, never by date.
+   */
+  private async pollSource(today: string, nowIso: string): Promise<boolean> {
+    const source = this.o.source;
+    if (!source) return false;
+    const realNow = (this.o.realNow ?? Date.now)();
+    if (realNow - this.lastPollAt < SOURCE_POLL_MS) return false;
+    this.lastPollAt = realNow;
+    let all: SourceTxn[];
+    try {
+      all = await source.fetchAll();
+      this.lastSourceError = undefined;
+    } catch (err) {
+      this.lastSourceError = (err as Error).message;
+      console.warn(`[finance] ${source.name} unreachable, keeping the current ledger: ${this.lastSourceError}`);
+      return false;
+    }
+    const seen = (this.ledger.sourceSeen ??= {});
+    if (!this.ledger.sourceBaselined) {
+      for (const t of all) seen[t.id] = true;
+      this.ledger.sourceBaselined = true;
+      return true;
+    }
+    const fresh = all.filter((t) => !seen[t.id]).sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "") || a.id.localeCompare(b.id));
+    for (const t of fresh) {
+      seen[t.id] = true;
+      this.applyFromSource(t, today, nowIso);
+    }
+    return true;
+  }
+
+  /** Turns a new transaction-log record into a ledger change. Records we cannot interpret are skipped with a warning. */
+  private applyFromSource(t: SourceTxn, today: string, nowIso: string): void {
+    const origin = { id: `nessie-${t.id}`, date: t.date && t.date <= today ? t.date : today };
+    const ledger = this.ledger;
+    if (t.kind === "purchase" && (t.account === "checking" || t.account === "card")) {
+      postPurchase(ledger, today, nowIso, { amount: t.amount, merchant: t.description || "Purchase", category: "other", account: t.account, ...origin });
+    } else if (t.kind === "deposit" && t.account === "checking") {
+      if (PAYCHECK.test(t.description)) postPaycheck(ledger, today, nowIso, t.amount, origin);
+      else postDeposit(ledger, today, nowIso, t.amount, t.description || "Deposit", origin);
+    } else if (t.kind === "withdrawal" && t.account === "checking") {
+      postWithdrawal(ledger, today, nowIso, t.amount, t.description || "Withdrawal", origin);
+    } else if (t.kind === "transfer") {
+      const route = ROUTE.exec(t.description);
+      if (route) postTransfer(ledger, today, nowIso, route[1]!.toLowerCase() as AccountId, route[2]!.toLowerCase() as AccountId, t.amount, origin);
+      else console.warn(`[finance] transfer ${t.id} has no "from->to" in its description, skipped`);
+    } else if (t.kind === "bill") {
+      const known = this.o.persona.recurringBills.some((b) => b.id === t.nickname);
+      if (!known && t.status !== "completed" && t.date && t.date >= today) postBill(ledger, { id: origin.id, label: t.description || "Bill", amount: t.amount, dueDate: t.date });
+    } else {
+      console.warn(`[finance] ${t.kind} ${t.id} on ${t.account} is not used by the engine, skipped`);
+    }
+  }
+
+  /**
+   * Writes a user action to the transaction log first, and remembers its id so the next read does not apply it twice.
+   * If the log cannot be written the action still happens locally (the engine is the source of truth for the demo).
+   */
+  private async record(write: (source: TxnSource) => Promise<string>): Promise<string | undefined> {
+    const source = this.o.source;
+    if (!source) return undefined;
+    try {
+      const id = await write(source);
+      (this.ledger.sourceSeen ??= {})[id] = true;
+      return `nessie-${id}`;
+    } catch (err) {
+      console.warn(`[finance] could not write to ${source.name}, applying locally only: ${(err as Error).message}`);
+      return undefined;
+    }
+  }
+
+  /** Read the transaction log now instead of waiting for the next poll. */
+  async refresh(): Promise<void> {
+    await this.exclusive(async () => {
+      this.lastPollAt = 0;
+      await this.sync();
+      this.save();
+    });
+  }
+
   private lastRetryAt = 0;
 
   /** Transfers the watcher could not resolve are tried again, at most every 15 real seconds. */
@@ -159,10 +255,10 @@ export class EngineBackend implements Backend, EngineOps {
   }
 
   /** Runs `fn` with the ledger caught up, then saves and re-detects so a change shows up as events immediately. */
-  private mutate<T>(fn: (ctx: { now: Date; today: string }) => T): Promise<T> {
+  private mutate<T>(fn: (ctx: { now: Date; today: string }) => T | Promise<T>): Promise<T> {
     return this.exclusive(async () => {
       const ctx = await this.sync();
-      const result = fn(ctx);
+      const result = await fn(ctx);
       await this.sync();
       this.save();
       return result;
@@ -172,7 +268,8 @@ export class EngineBackend implements Backend, EngineOps {
   // ---- Backend
 
   async health() {
-    return { ok: true, service: "finance", mode: "engine" };
+    const sourceError = this.o.sourceError ?? this.lastSourceError;
+    return { ok: true, service: "finance", mode: "engine", source: this.o.source?.name ?? "persona", ...(sourceError ? { sourceError } : {}) };
   }
 
   async facts(): Promise<FactsSnapshot> {
@@ -243,6 +340,7 @@ export class EngineBackend implements Backend, EngineOps {
       this.ledger = createLedger(this.o.persona, today, overrides);
       this.log = new EventLog();
       this.current = scenario;
+      this.lastPollAt = 0; // the log's current contents become history again
       await this.sync();
       this.save();
     });
@@ -264,6 +362,12 @@ export class EngineBackend implements Backend, EngineOps {
         txnCount: this.ledger.txns.length,
         eventCount: this.log.all().length,
         recentTxns: this.ledger.txns.filter((t) => t.kind !== "daily").slice(-5),
+        source: {
+          name: this.o.source?.name ?? "persona",
+          baselined: this.ledger.sourceBaselined ?? false,
+          recordsSeen: Object.keys(this.ledger.sourceSeen ?? {}).length,
+          ...(this.o.sourceError || this.lastSourceError ? { error: this.o.sourceError ?? this.lastSourceError } : {}),
+        },
       };
     });
   }
@@ -289,21 +393,33 @@ export class EngineBackend implements Backend, EngineOps {
   }
 
   purchase(op: PurchaseOp): Promise<Txn> {
-    return this.mutate(({ now, today }) => postPurchase(this.ledger, today, now.toISOString(), op));
+    return this.mutate(async ({ now, today }) => {
+      const id = await this.record((src) =>
+        src.recordPurchase({ account: op.account ?? "checking", amount: op.amount, merchant: op.merchant ?? "Purchase", category: op.category ?? "shopping", date: today }),
+      );
+      return postPurchase(this.ledger, today, now.toISOString(), { ...op, id });
+    });
   }
 
   transfer(from: AccountId, to: AccountId, amount: number): Promise<Txn> {
-    return this.mutate(({ now, today }) => postTransfer(this.ledger, today, now.toISOString(), from, to, amount));
+    return this.mutate(async ({ now, today }) => {
+      const id = await this.record((src) => src.recordTransfer({ from, to, amount, date: today }));
+      return postTransfer(this.ledger, today, now.toISOString(), from, to, amount, { id });
+    });
   }
 
   paycheck(amount?: number): Promise<Txn> {
-    return this.mutate(({ now, today }) => postPaycheck(this.ledger, today, now.toISOString(), amount));
+    return this.mutate(async ({ now, today }) => {
+      const id = await this.record((src) => src.recordDeposit({ amount: amount ?? this.ledger.paycheckAmount, description: "Paycheck", date: today }));
+      return postPaycheck(this.ledger, today, now.toISOString(), amount, { id });
+    });
   }
 
   bill(op: BillOp) {
-    return this.mutate(({ today }) => {
+    return this.mutate(async ({ today }) => {
       const dueDate = op.dueDate ?? addDays(today, op.dueInDays ?? 2);
-      const bill = postBill(this.ledger, { label: op.label, amount: r2(op.amount), dueDate, essential: op.essential });
+      const id = await this.record((src) => src.recordBill({ label: op.label, amount: op.amount, dueDate }));
+      const bill = postBill(this.ledger, { id, label: op.label, amount: r2(op.amount), dueDate, essential: op.essential });
       return { id: bill.id, label: bill.label, amount: bill.amount, dueDate: bill.dueDate };
     });
   }

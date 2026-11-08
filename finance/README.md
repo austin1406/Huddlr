@@ -23,6 +23,15 @@ The engine runs Maya's persona as a simulated customer. Nothing is faked per req
 - **State:** ledger and event log are saved to `finance/.data/` (git-ignored) and survive restarts. The `sim_state` row is stored in Postgres when `DATABASE_URL` is set (the agents service reads it from there); otherwise in `finance/.data/sim_state.json`, which only this service can see.
 - **Fixture parity:** with a fresh ledger on 2026-11-07 the engine reproduces `contracts/fixtures/facts.fixture.json` exactly, and the shortfall fixture with `checking 33, last paid 12 days ago`. A test fails if either drifts.
 
+### Transaction log (Nessie)
+
+`DATA_SOURCE=nessie` makes Nessie the transaction log (default `persona` changes nothing). The engine keeps its own ledger and balances because Nessie cannot hold them (see `docs/nessie.md`). What it does:
+
+- Reads everything at start as history, then applies any record id it has not seen, at most every 30 seconds.
+- Writes CLI and dashboard actions to Nessie first (whole dollars, status and dates included), then applies them with exact cents. Nothing is applied twice.
+- Stays up on the persona if Nessie is unreachable; `GET /health` shows `source` and `sourceError`, `GET /admin/state` shows records seen.
+- Env: `NESSIE_API_KEY`, `NESSIE_BASE_URL` (default `https://api.nessieisreal.com`), `NESSIE_CUSTOMER` (default the persona's name).
+
 ### Demo controls
 
 Run from `finance/` against the running service (`FINANCE_ADMIN_URL`, default `http://localhost:4000`; `/admin` is not routed by Caddy, so run these on the VM, or call the same routes from the demo controller on localhost).

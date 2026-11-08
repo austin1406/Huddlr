@@ -24,6 +24,7 @@ export interface AdminState {
   txnCount: number;
   eventCount: number;
   recentTxns: Txn[];
+  source: { name: string; baselined: boolean; recordsSeen: number; error?: string };
 }
 
 export interface PurchaseOp {
