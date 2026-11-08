@@ -22,6 +22,13 @@ export const ProjectionRequest = z
     iraReturnPercent: z.number().min(0).max(15).optional(),
     /** Yearly interest assumed on savings. Default 0. */
     savingsApyPercent: z.number().min(0).max(10).optional(),
+    /**
+     * learned (default): everyday spending is learned from the ledger's history, recurring payments are found, and many
+     * simulated futures give a likely range. simple: the profile's flat daily average, no range (the original model).
+     */
+    model: z.enum(["learned", "simple"]).optional(),
+    /** Simulated futures for the likely range. Default 300; 0 turns the range off. */
+    runs: z.number().int().min(0).max(1000).optional(),
   })
   .superRefine((v, ctx) => {
     if (v.amount > MAX_BY_UNIT[v.unit]) {
@@ -63,6 +70,36 @@ export const ProjectionSummary = z.object({
 });
 export type ProjectionSummary = z.infer<typeof ProjectionSummary>;
 
+/** What the model believes about everyday spending, and what it found. */
+export const ProjectionModel = z.object({
+  kind: z.enum(["learned", "simple"]),
+  dailySpendMean: money,
+  /** How much a single day varies around the mean. */
+  dailySpendSd: money,
+  /** profile: no spending history yet, the profile's belief is used. history: learned from observed days. */
+  basis: z.enum(["profile", "history"]),
+  daysObserved: z.number().int(),
+  /** 0 to 1: how much of the estimate came from history rather than the profile. */
+  weightOnHistory: z.number(),
+  /** Payments nobody told the engine about that repeat on a rhythm, now included in the projection. */
+  detectedRecurring: z.array(z.object({ label: z.string(), amount: money, everyDays: z.number().int(), nextDate: isoDate, seen: z.number().int() })),
+});
+export type ProjectionModel = z.infer<typeof ProjectionModel>;
+
+/** The middle 80% of simulated futures, one value per entry in `points`, plus risk numbers for the whole window. */
+export const ProjectionUncertainty = z.object({
+  runs: z.number().int(),
+  p10: z.array(money),
+  p50: z.array(money),
+  p90: z.array(money),
+  endNetWorth: z.object({ p10: money, p50: money, p90: money }),
+  /** Share of simulated futures in which checking goes below zero on at least one day (0 to 1). */
+  probCheckingNegative: z.number(),
+  /** Share of simulated futures in which the card is fully paid by the end of the window (0 to 1). */
+  probCardPaidOffByEnd: z.number(),
+});
+export type ProjectionUncertainty = z.infer<typeof ProjectionUncertainty>;
+
 export const Projection = z.object({
   strategy: z.enum(["current", "coach"]),
   /** The accounts right now, before the first projected day. */
@@ -71,6 +108,9 @@ export const Projection = z.object({
   points: z.array(ProjectionPoint).min(1),
   summary: ProjectionSummary,
   assumptions: z.array(z.string()),
+  model: ProjectionModel.optional(),
+  /** Null when the likely range is off (runs 0) or the model is simple. */
+  uncertainty: ProjectionUncertainty.nullable().optional(),
 });
 export type Projection = z.infer<typeof Projection>;
 

@@ -186,6 +186,7 @@ export class EngineBackend implements Backend, EngineOps {
     const seen = (this.ledger.sourceSeen ??= {});
     if (!this.ledger.sourceBaselined) {
       for (const t of all) seen[t.id] = true;
+      this.ledger.history = all.filter((t) => t.kind === "purchase" && t.date).map((t) => ({ date: t.date!, amount: t.amount, description: t.description }));
       this.ledger.sourceBaselined = true;
       return true;
     }
