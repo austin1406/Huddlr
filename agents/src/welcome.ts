@@ -7,7 +7,7 @@ import { queueOutbox } from "./outbox";
 export function welcomeText(huddleUrl?: string | null): string {
   const accounts = cast.filter((c) => c.id !== "coach").map((c) => `${c.emoji} ${c.name}`);
   const coach = cast.find((c) => c.id === "coach")!;
-  const intro = `Meet your money: ${accounts.slice(0, -1).join(", ")} and ${accounts.at(-1)} each watch one account. ${coach.emoji} ${coach.name} always gives the final plan. Ask anything, or @mention one of them (like @Savings).`;
+  const intro = `Welcome to your money's group chat! You're now chatting with ${accounts.slice(0, -1).join(", ")} and ${accounts.at(-1)}. Each one watches one of your accounts, and ${coach.emoji} ${coach.name} turns what they say into one plan. Ask the group anything, or @mention one of them (like @Savings).`;
   // P3's Huddle page: everyone at one table. Text "huddle link" anytime for a fresh one.
   return huddleUrl ? `${intro} See everyone at one table here: ${huddleUrl} Text "huddle link" anytime for a new one.` : intro;
 }

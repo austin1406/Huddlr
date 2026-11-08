@@ -93,7 +93,7 @@ accounts first) gives its option, and the Coach closes with the code-built botto
    iMessage via `outbox.reply_to_outbox`.
 4. The Coach closes with "Bottom line:", the one move ("Move $457.00 from Checking to Card in your bank app."), and the rest for later. It never asks for a YES: the Coach can't move money.
 
-A phone's first text ever gets the Coach's welcome first ("Meet your money: 🏦 Checking, 🐷 Savings, …"), built from
+A phone's first text ever gets the Coach's welcome first ("Welcome to your money's group chat! You're now chatting with 🏦 Checking, 🐷 Savings, …"), built from
 `contracts/cast.json`, once per phone (again after a reset).
 
 ## Loan
