@@ -147,3 +147,13 @@ test("setup: agent body references secrets by id, never by value", async () => {
   assert.equal(p.outbound_trunk_config.address, "sip.spectrum.photon.codes");
   assert.equal(p.outbound_trunk_config.transport, "tls");
 });
+
+test("every tool field has a description (ElevenLabs rejects fields without one)", () => {
+  const walk = (schema: { properties?: Record<string, any> }, path: string): string[] =>
+    Object.entries(schema.properties ?? {}).flatMap(([k, v]) => [
+      ...(v.description ? [] : [`${path}.${k}`]),
+      ...(v.type === "object" ? walk(v, `${path}.${k}`) : []),
+    ]);
+  const missing = buildTools("https://x", "s").flatMap((t) => walk(t.api_schema.request_body_schema as any, t.name));
+  assert.deepEqual(missing, []);
+});
