@@ -198,14 +198,31 @@ export async function runWindfall(
   };
 
   const plan = await finance.plan(ask.amount).catch(() => null);
-  const proposal = plan ? proposalFromPlan(plan) : null;
-  const favored = plan?.lines.map((l) => String(l.destination) as CharacterId).find((d) => ACCOUNT_CHARACTERS.has(d));
-  const rivals = (["savings", "card", "ira", "car_loan"] as CharacterId[]).filter((c) => c !== favored);
-  const accounts = [...(favored ? [favored] : []), ...rivals].slice(0, config.moderator.max_speakers_per_event - 1);
+  // The bonus is already in Checking. A Checking line in P1's plan means "keep this much there" (it covers a gap),
+  // not a transfer. The one thing to say YES to is the first line that moves money OUT of Checking.
+  const keepLines = plan?.lines.filter((l) => l.destination === "checking" && l.amount > 0) ?? [];
+  const moves = plan?.lines.filter((l) => l.destination !== "checking" && !String(l.destination).startsWith("goal:") && l.amount > 0) ?? [];
+  const keep = keepLines.reduce((s, l) => s + l.amount, 0);
+  const main = moves[0];
+  const mainTo = main ? (String(main.destination) as "savings" | "card" | "car_loan" | "ira") : null;
+  const proposal = main && mainTo
+    ? { from: "checking" as const, to: mainTo, amount: main.amount, actionText: `Move ${usd(main.amount)} from Checking to ${ACCOUNT_LABEL[mainTo]}` }
+    : null;
+  // The Coach sides with where the money goes; the "X is right" rule follows the plan's first line, so lead with the move.
+  const coachPlan = plan && main ? { ...plan, lines: [...moves, ...keepLines] } : plan;
+  const split = [
+    ...(keep > 0 ? [`keep ${usd(keep)} in Checking${facts.shortfall ? " so you're not short before payday" : ""}`] : []),
+    ...moves.map((m) => `move ${usd(m.amount)} to ${ACCOUNT_LABEL[String(m.destination)] ?? String(m.destination)}`),
+  ].join(", and ");
+
+  // Speakers: where the money goes, plus Checking if some of it stays there to cover a gap, else one rival.
+  const rivals = (["savings", "card", "ira", "car_loan"] as CharacterId[]).filter((c) => c !== mainTo);
+  const accounts = (mainTo ? [mainTo, ...(keep > 0 ? (["checking"] as CharacterId[]) : rivals)] : (["checking", "savings"] as CharacterId[]))
+    .slice(0, config.moderator.max_speakers_per_event - 1);
 
   let proposalId: number | null = null;
   if (plan && proposal) {
-    const created = await proposals.create({ userPhone, plan, ...proposal, sourceEventId: null });
+    const created = await proposals.create({ userPhone, plan, ...proposal, sourceEventId: `chat_windfall_${ask.inboundId}` });
     proposalId = created.proposal ? Number(created.proposal.id) : null;
     if (proposalId != null) await scheduleProposalFollowUps(db, { userPhone, proposalId, now, emergency: false });
   }
@@ -215,23 +232,32 @@ export async function runWindfall(
       idempotency_key: `inbound:${ask.inboundId}:${speaker}`, user_phone: userPhone, speaker, text, reply_to: ask.inboundId,
       thread_key: `inbound:${ask.inboundId}`, proposal_id: pid, priority: 1, created_sim_at: now.toISOString(),
     });
-  const extraSources = [[ask.amount]];
+  const extraSources = [[ask.amount, keep]];
   const heard: Array<{ name: string; text: string }> = [];
+  const money = `The ${usd(ask.amount)} is new money that just landed in Checking (it is not coming out of Savings).`;
   await Promise.all(
     accounts.map(async (id) => {
-      const r = await speak(id, facts, `The user texted: "${ask.text}". They have ${usd(ask.amount)} extra. Make the case for what your account would do with it, in character. Disagree with the others if your account would.`, {
+      const stance = id === "checking" && keep > 0
+        ? `Argue that ${usd(keep)} of it should stay in Checking so the balance doesn't go short before payday.`
+        : `Make the case for what your account would do with it, in character. Disagree with the others if your account would.`;
+      const r = await speak(id, facts, `The user texted: "${ask.text}". ${money} ${stance}`, {
         event, model: deps.model, deadline: started + config.debate.first_message_target_ms, extraSources,
       });
       await queue(id, r.text);
       heard.push({ name: character(id).name, text: r.text });
     }),
   );
-  // No new proposal (one is already waiting for a YES): never invite a YES here, it would approve the old plan.
-  const line = proposalId != null
-    ? await speak("coach", facts, `The accounts just argued about the user's ${usd(ask.amount)}. Settle it with the plan.`, {
-        event, plan, ask: proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
-      })
-    : { text: `Good problem to have. Before we plan the ${usd(ask.amount)}, there's already a plan waiting on you: reply YES or NO to that one first, then text me again.` };
+  let line: { text: string };
+  if (proposalId != null)
+    line = await speak("coach", facts, `The accounts just argued about the user's ${usd(ask.amount)}. ${money} The plan: ${split}. Explain that split in plain words (say where each part goes and why), then give the YES line.`, {
+      event, plan: coachPlan, ask: proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
+    });
+  else if (plan && !main && keep > 0)
+    // Everything stays in Checking: nothing to move, so nothing to say YES to.
+    line = { text: `Keep the whole ${usd(ask.amount)} in Checking for now${facts.shortfall ? `: you'd be short ${usd(facts.shortfall.amount)} before payday, and this covers it` : ""}. Nothing to move, so no YES needed.` };
+  else
+    // No new proposal could be made: never invite a YES here, it could approve something else.
+    line = { text: `Good problem to have. I couldn't build a plan for the ${usd(ask.amount)} right now. Text me again in a minute and the crew will weigh in.` };
   await queue("coach", line.text, proposalId);
   return { speakers: [...accounts, "coach"], proposalId };
 }

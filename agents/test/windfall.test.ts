@@ -18,10 +18,10 @@ const PHONE = "+12145550123";
 /** Invents a number in every reply, so everything sent must come out of the checker grounded. */
 const liar = async () => "Only $9,999.99 left, trust me!";
 
-async function setup() {
+async function setup(scenario: "normal" | "shortfall" = "normal", model: (p: string) => Promise<string> = liar) {
   const db = new PGlite();
   await migrate(db);
-  const app = createFinanceApp({ secret: "", state: new StubState("normal") });
+  const app = createFinanceApp({ secret: "", state: new StubState(scenario) });
   const finance = financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch);
   const facts = await finance.facts();
   const now = new Date(facts.asOf);
@@ -36,9 +36,14 @@ async function setup() {
   };
   const chat = async (text: string) => {
     const id = await inbound(text);
+    // What handleInbound does before chat: the user's text goes into the shared history.
+    await db.query(
+      "INSERT INTO memory_messages (user_phone, channel, direction, speaker, text, inbound_id, created_sim_at) VALUES ($1, 'text', 'in', 'user', $2, $3, $4)",
+      [PHONE, text, id, now],
+    );
     return handleChat(
-      { db, facts: () => finance.facts(), userPhone: PHONE, finance, model: liar,
-        windfall: (ask, t) => runWindfall({ db, finance, proposals, userPhone: PHONE, model: liar }, ask, t) },
+      { db, facts: () => finance.facts(), userPhone: PHONE, finance, model,
+        windfall: (ask, t) => runWindfall({ db, finance, proposals, userPhone: PHONE, model }, ask, t) },
       { id, text },
       now,
     );
@@ -112,6 +117,48 @@ test("@savings with a bonus question gets one voice, not the whole crew", async 
   assert.equal(r.debate, undefined);
   assert.equal(r.responder, "savings");
   assert.equal((await outbox()).length, 1);
+});
+
+test("bare amounts count when a windfall word makes it clear", () => {
+  assert.deepEqual(parseWindfall("I got a 600 bonus"), { amount: 600, label: "the user got a bonus" });
+  assert.equal(parseWindfall("what should I do with 3 accounts"), null, "no windfall word: bare numbers don't count");
+});
+
+// The phone run: short before payday, then "$600 bonus". P1's plan: keep $143 in Checking, $457 to Card.
+test("bonus while short: keep part in Checking, the YES moves the rest OUT of Checking (never 'from Savings')", async () => {
+  const { chat, outbox, proposals } = await setup("shortfall");
+  const r = await chat("I got a $600 bonus. What should I do with it?");
+  assert.deepEqual(r.debate, ["card", "checking", "coach"], "where the money goes, plus Checking (it keeps some)");
+
+  const pending = await proposals.getPending(PHONE);
+  assert.equal(pending?.actionText, "Move $457.00 from Checking to Card");
+  assert.equal(pending?.from, "checking");
+  const coach = (await outbox()).at(-1)!;
+  assert.match(coach.text, /Reply YES to: Move \$457\.00 from Checking to Card/);
+  for (const m of await outbox()) assert.doesNotMatch(m.text, /from Savings/);
+});
+
+test("a confused follow-up goes to the Coach, with the conversation and the waiting plan in front of it", async () => {
+  const prompts: string[] = [];
+  const spy = async (p: string) => { prompts.push(p); return "Only $9,999.99 left, trust me!"; };
+  const { chat, proposals } = await setup("shortfall", spy);
+  await chat("I got a $600 bonus. What should I do with it?");
+  const before = (await proposals.getPending(PHONE))!.id;
+  prompts.length = 0;
+
+  const r = await chat("why am i moving 152 from savings to checking? what about the 600?");
+  assert.equal(r.responder, "coach", "not Savings, even though it says 'savings'");
+  const p = prompts.at(-1)!;
+  assert.match(p, /RECENT CONVERSATION/);
+  assert.match(p, /you: I got a \$600 bonus/);
+  assert.match(p, /THE PLAN WAITING FOR THEIR YES: "Move \$457\.00 from Checking to Card"/);
+  assert.match(p, /keep \$143\.00 in Checking/);
+
+  // Asking about the same bonus again explains the waiting plan; it doesn't start a second debate.
+  const again = await chat("so where do i put the 600 bonus??");
+  assert.equal(again.debate, undefined);
+  assert.equal(again.responder, "coach");
+  assert.equal((await proposals.getPending(PHONE))!.id, before, "same plan still waiting");
 });
 
 test("re-queuing an existing outbox key does not burn ids", async () => {
