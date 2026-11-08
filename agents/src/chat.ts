@@ -30,6 +30,21 @@ export function parseMention(text: string): { who: CharacterId; rest: string } |
   return who ? { who, rest: m[2].trim() } : null;
 }
 
+/**
+ * "I got a $600 bonus, what should I do?" -> { amount: 600, label: "a bonus" }. Needs exactly one dollar amount and
+ * either a windfall word (bonus, refund, gift, ...) or a "what should I do with" question.
+ */
+export function parseWindfall(text: string): { amount: number; label: string } | null {
+  const t = text.toLowerCase();
+  const kind =
+    t.match(/\b(bonus|tax refund|refund|tax return|inheritance|gift|raise|commission|side hustle|freelance|cash back|winnings|windfall|birthday money)\b/)?.[1] ?? null;
+  const asks = /\bwhat should i do\b|\bwhere should (it|i put)\b|\bhow should i (use|spend|split)\b|\bwhat do i do with\b|\bshould i (save|invest|pay)\b/.test(t);
+  if (!kind && !(asks && /\b(extra|got|have|received|made|earned)\b/.test(t))) return null;
+  const money = extractNumbers(text).filter((n) => n.kind === "money");
+  if (money.length !== 1 || !money[0].value || money[0].value <= 0) return null;
+  return { amount: money[0].value, label: kind ? `the user got ${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind}` : "the user has extra money" };
+}
+
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
 export function pickResponder(text: string): CharacterId {
   const t = text.toLowerCase();
@@ -42,10 +57,14 @@ export function pickResponder(text: string): CharacterId {
 }
 
 export async function handleChat(
-  deps: { db: Queryable; facts: () => Promise<FactsSnapshot>; userPhone: string; model?: (p: string) => Promise<string>; finance?: Finance },
+  deps: {
+    db: Queryable; facts: () => Promise<FactsSnapshot>; userPhone: string; model?: (p: string) => Promise<string>; finance?: Finance;
+    /** Runs the group debate for a windfall (debate.ts runWindfall). Without it, the question gets one answer. */
+    windfall?: (ask: { inboundId: number; text: string; amount: number; label: string }, now: Date) => Promise<{ speakers: CharacterId[] }>;
+  },
   inbound: { id: number; text: string | null },
   now: Date,
-): Promise<{ learned: number; responder: CharacterId | null }> {
+): Promise<{ learned: number; responder: CharacterId | null; debate?: CharacterId[] }> {
   const text = inbound.text?.trim() ?? "";
   if (!text) return { learned: 0, responder: null };
   const base = { user_phone: deps.userPhone, reply_to: inbound.id, thread_key: `inbound:${inbound.id}`, priority: 1 as const, created_sim_at: now.toISOString() };
@@ -60,6 +79,14 @@ export async function handleChat(
     const answer = (await recallAnswer(deps.db, deps.userPhone, facts.timezone)) ?? "Nothing's been decided yet: no calls or plans on record. Text me any time you want the crew to weigh in.";
     await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:recall`, speaker: "coach", text: answer });
     return { learned: 0, responder: "coach" };
+  }
+
+  // "I got a $600 bonus, what should I do?" gets the whole crew: a debate and a plan to say YES to.
+  // An @-mention means the user wants one voice, so it skips this.
+  const windfall = !parseMention(text) && deps.windfall ? parseWindfall(text) : null;
+  if (windfall && deps.windfall) {
+    const r = await deps.windfall({ inboundId: inbound.id, text, ...windfall }, now);
+    return { learned: 0, responder: "coach", debate: r.speakers };
   }
 
   const learned = extractMemory(text);

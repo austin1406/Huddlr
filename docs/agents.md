@@ -80,6 +80,15 @@ finance isn't on localhost:4000).
 - Try it on the VM (finance's engine mode): `cd finance && npm run post-transfer -- checking savings 200`. The cheer
   arrives within ~5 s. Locally, `agents/test/celebrate.test.ts` covers every case.
 
+## "I got a $600 bonus, what should I do?"
+
+A text with one dollar amount and a windfall word (bonus, refund, tax return, gift, inheritance, commission, ...) or
+"what should I do with" gets the whole crew, not one answer: P1 plans for that amount, the account the plan favors
+argues with one rival, and the Coach closes with "Reply YES to: …". It's a reply, so the daily cap and quiet hours
+don't apply, and there's a reminder later but never a call. A new plan replaces any plan still waiting, so YES always
+approves what the latest message asked. `@savings I got a bonus…` still gets one voice.
+Try it with real Gemini: `npx tsx scripts/try-windfall.ts`.
+
 ## Rules that are tested
 
 - 0 ungrounded numbers: Gate 1 (30 runs) runs in CI with a test model that invents a number in every other reply.

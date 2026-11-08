@@ -176,6 +176,66 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
   return result;
 }
 
+const ACCOUNT_CHARACTERS = new Set<CharacterId>(["checking", "savings", "card", "car_loan", "ira"]);
+
+/**
+ * "I got a $600 bonus, what should I do?" by text: the same group debate an event gets, as a reply.
+ * P1 plans for the amount first, so the account the plan favors is one of the two speakers (it can be "right"),
+ * plus one rival; the Coach closes with the plan and a proposal the user can say YES to.
+ * Replies don't count toward the daily cap or quiet hours (the user just asked), and there is no escalation call.
+ */
+export async function runWindfall(
+  deps: Omit<DebateDeps, "clock">,
+  ask: { inboundId: number; text: string; amount: number; label: string },
+  now: Date,
+): Promise<{ speakers: CharacterId[]; proposalId: number | null }> {
+  const { db, finance, proposals, userPhone } = deps;
+  const started = Date.now();
+  const facts = await finance.facts();
+  const event: FinanceEvent = {
+    id: `chat_windfall_${ask.inboundId}`, type: "paycheck_landed", occurredAt: now.toISOString(), severity: "medium", accountId: null,
+    data: { amount: ask.amount, label: ask.label },
+  };
+
+  const plan = await finance.plan(ask.amount).catch(() => null);
+  const proposal = plan ? proposalFromPlan(plan) : null;
+  const favored = plan?.lines.map((l) => String(l.destination) as CharacterId).find((d) => ACCOUNT_CHARACTERS.has(d));
+  const rivals = (["savings", "card", "ira", "car_loan"] as CharacterId[]).filter((c) => c !== favored);
+  const accounts = [...(favored ? [favored] : []), ...rivals].slice(0, config.moderator.max_speakers_per_event - 1);
+
+  let proposalId: number | null = null;
+  if (plan && proposal) {
+    const created = await proposals.create({ userPhone, plan, ...proposal, sourceEventId: null });
+    proposalId = created.proposal ? Number(created.proposal.id) : null;
+    if (proposalId != null) await scheduleProposalFollowUps(db, { userPhone, proposalId, now, emergency: false });
+  }
+
+  const queue = (speaker: CharacterId, text: string, pid: number | null = null) =>
+    queueOutbox(db, {
+      idempotency_key: `inbound:${ask.inboundId}:${speaker}`, user_phone: userPhone, speaker, text, reply_to: ask.inboundId,
+      thread_key: `inbound:${ask.inboundId}`, proposal_id: pid, priority: 1, created_sim_at: now.toISOString(),
+    });
+  const extraSources = [[ask.amount]];
+  const heard: Array<{ name: string; text: string }> = [];
+  await Promise.all(
+    accounts.map(async (id) => {
+      const r = await speak(id, facts, `The user texted: "${ask.text}". They have ${usd(ask.amount)} extra. Make the case for what your account would do with it, in character. Disagree with the others if your account would.`, {
+        event, model: deps.model, deadline: started + config.debate.first_message_target_ms, extraSources,
+      });
+      await queue(id, r.text);
+      heard.push({ name: character(id).name, text: r.text });
+    }),
+  );
+  // No new proposal (one is already waiting for a YES): never invite a YES here, it would approve the old plan.
+  const line = proposalId != null
+    ? await speak("coach", facts, `The accounts just argued about the user's ${usd(ask.amount)}. Settle it with the plan.`, {
+        event, plan, ask: proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
+      })
+    : { text: `Good problem to have. Before we plan the ${usd(ask.amount)}, there's already a plan waiting on you: reply YES or NO to that one first, then text me again.` };
+  await queue("coach", line.text, proposalId);
+  return { speakers: [...accounts, "coach"], proposalId };
+}
+
 /** Reads new events from finance after the stored cursor and runs each one. The first call only records where "now" is. */
 export async function pollEvents(deps: DebateDeps): Promise<DebateResult[]> {
   const cur = await deps.db.query<{ value: string }>("SELECT value FROM agent_state WHERE key = 'events_cursor'");
