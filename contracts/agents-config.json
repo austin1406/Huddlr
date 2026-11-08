@@ -7,7 +7,8 @@
     "env_override": "CHARACTER_MODEL",
     "max_output_tokens": 180,
     "temperature": 0.7,
-    "timeout_ms": 4000
+    "timeout_ms": 4000,
+    "max_attempts": 4
   },
   "moderator": {
     "max_accounts_per_event": 3,
@@ -27,8 +28,9 @@
   "debate": {
     "first_message_target_ms": 5000,
     "plan_target_ms": 15000,
+    "chat_reply_deadline_ms": 15000,
     "round2_only_if_ms_remaining": 6000,
-    "checker_retry_only_if_ms_remaining": 3000
+    "checker_retry_only_if_ms_remaining": 1500
   },
   "proposals": {
     "ttl_minutes": 120,
