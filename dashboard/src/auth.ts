@@ -4,6 +4,7 @@
  * 1. The link (signed, expires) says which phone this page is for. Asking for a new link cancels older ones.
  * 2. Opening it asks for a 6-digit code, which we text to that phone through the normal outbox.
  * 3. The right code gives this browser a 24-hour session (an httpOnly cookie). Only a hash is stored.
+ *    Asking for a new link signs out every device, so the new link always asks for a code.
  * So getting in needs the link AND the phone. Nothing here can move money either way.
  */
 import { createHash, randomBytes, randomInt } from "node:crypto";
@@ -37,7 +38,9 @@ export async function linksValidFrom(db: Db, phone: string): Promise<number> {
   return r.rows[0] ? Number(r.rows[0].not_before) : 0;
 }
 
+/** A new link turns off older links AND signs out every device, so opening it always asks for a fresh code. */
 export async function cancelOlderLinks(db: Db, phone: string, nowMs = Date.now()): Promise<void> {
+  await db.query(`DELETE FROM p3_huddle_sessions WHERE user_phone = $1`, [phone]);
   await db.query(
     `INSERT INTO p3_huddle_links (user_phone, not_before) VALUES ($1, $2)
      ON CONFLICT (user_phone) DO UPDATE SET not_before = EXCLUDED.not_before`,
