@@ -1,5 +1,7 @@
 import type {
   AccountId,
+  ProjectionRequest,
+  ProjectionResponse,
   AcceptProposalResponse,
   CanIAffordResponse,
   FactsSnapshot,
@@ -67,6 +69,8 @@ export interface Backend {
   canIAfford(amount: number): Promise<CanIAffordResponse>;
   whatIf(scenario: Scenario): Promise<WhatIfResult>;
   plan(amount: number): Promise<Plan>;
+  /** Long-range projection of every account. Engine only. */
+  project?(request: ProjectionRequest): Promise<ProjectionResponse>;
   pending(): Promise<ProposalSummary | null>;
   accept(proposalId: string, via: "text" | "voice"): Promise<AcceptProposalResponse>;
   scenario(): ScenarioName;
