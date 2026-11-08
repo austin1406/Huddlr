@@ -129,7 +129,7 @@ test("account summary: every account, priorities and the waiting plan, built in 
   assert.equal(r.responder, "coach");
   const text = (await last()).text;
   assert.equal(text.split("\n")[0], "Here's where you stand:");
-  for (const line of [/🏦 Checking: \$1,186\.50, with \$437\.50 safe to spend until payday on Nov 20\./, /🐷 Savings: \$900\.00, about 0\.45 months of essentials\./,
+  for (const line of [/🏦 Checking: \$1,186\.50, with \$437\.50 safe to spend until payday on Nov 20\./, /🐷 Savings: \$900\.00, enough to cover about 2 weeks of must-pay bills if your income stopped\./,
     /💳 Card: \$2,400\.00 owed at 24% APR, about \$48\.00 a month in interest\./, /🚗 Car Loan: \$14,500\.00 owed, \$320\.00 a month\./,
     /🌱 IRA: \$8,200\.00, with \$150\.00 of employer match still unclaimed\./, /Your priorities: IRA first; Savings last\./, /Waiting on your YES: Move \$150\.00 from Checking to IRA\./])
     assert.match(text, line);
@@ -139,4 +139,63 @@ test("summary when short says so", async () => {
   const app = createApp({ secret: "", state: new StubState("shortfall") });
   const f = financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch);
   assert.match(accountSummary(await f.facts(), null, null), /🏦 Checking: \$33\.00, but short \$43\.00 on Dec 2; a \$143\.00 transfer fixes it\./);
+});
+
+// ---------- plain words: the savings cushion, and "explain" questions ----------
+
+test("the savings cushion is said in weeks or months of must-pay bills, never 'months of essentials'", async () => {
+  const { cushionWords, keyNumbers, factsFor } = await import("../src/character");
+  const { checkMessage } = await import("../src/checker");
+  const app = createApp({ secret: "", state: new StubState("normal") });
+  const facts = await financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch).facts();
+  const c = cushionWords(facts)!;
+  assert.equal(c.span, "about 2 weeks");
+  assert.equal(c.sentence, "If your income stopped, your $900.00 in savings would cover about 2 weeks of must-pay bills ($2,007.00 a month for things like rent and utilities).");
+  assert.equal(cushionWords(facts, 3011)!.span, "about 1.5 months");
+  assert.equal(cushionWords(facts, 100)!.span, "less than a week");
+  const k = keyNumbers("savings", facts, null);
+  assert.ok(k.some((x) => x.includes(c.sentence)));
+  assert.doesNotMatch(c.sentence, /months of essentials|runway/);
+  assert.ok(!k.some((x) => /cushion: [\d.]+ months/.test(x)), "the old '0.45 months of essentials' key number is gone");
+  assert.equal(checkMessage(c.sentence, factsFor("savings", facts, null)).ok, true, "the checker accepts it");
+});
+
+test("'explain' questions go to the character the word belongs to, in simple words", async () => {
+  const { isExplainRequest, explainer } = await import("../src/chat");
+  for (const t of ["explain APR", "what does utilization mean", "what's an employer match", "i don't get it", "can you say that in simple words", "what is a cushion"])
+    assert.equal(isExplainRequest(t), true, t);
+  assert.equal(isExplainRequest("how is my card"), false);
+  assert.equal(explainer("what does APR mean"), "card");
+  assert.equal(explainer("what's an employer match"), "ira");
+  assert.equal(explainer("explain the cushion"), "savings");
+  assert.equal(explainer("what's a shortfall"), "checking");
+
+  const prompts: string[] = [];
+  const db = new PGlite();
+  await migrate(db);
+  const app = createApp({ secret: "", state: new StubState("normal") });
+  const finance = financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch);
+  const now = new Date((await finance.facts()).asOf);
+  await db.query("INSERT INTO inbound_messages (provider_msg_id, user_phone, text, received_sim_at) VALUES ('a', $1, 'x', $2)", [PHONE, now]);
+  const r = await handleChat({ db, facts: () => finance.facts(), userPhone: PHONE, finance, model: async (p) => { prompts.push(p); return "APR is the yearly interest rate on what you owe."; } },
+    { id: 1, text: "what does APR mean" }, now);
+  assert.equal(r.responder, "card");
+  assert.match(prompts[0], /Explain it in simple words, like you're texting a friend who's new to money: up to 3 short sentences/);
+  assert.match(prompts[0], /APR: the yearly interest rate on what you owe/);
+});
+
+test("'what does that mean' can't just repeat the last message; the fallback explains instead", async () => {
+  const { repeatProblem, explainTemplate, styleProblem } = await import("../src/character");
+  const last = "If your income stopped, your $900.00 in savings would cover about 2 weeks of must-pay bills. That's tight.";
+  assert.match(repeatProblem("If your income stopped, your $900.00 in savings would cover about 2 weeks of must-pay bills. More words.", [last])!, /Don't repeat/);
+  assert.equal(repeatProblem("Think of savings as your backup if a paycheck didn't come.", [last]), null);
+  const app = createApp({ secret: "", state: new StubState("normal") });
+  const facts = await financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => app.request(u.replace("http://f", ""), i)) as typeof fetch).facts();
+  for (const id of ["checking", "savings", "card", "car_loan", "ira", "coach"] as const) {
+    const t = explainTemplate(id, facts);
+    assert.ok(t.length > 20, id);
+    assert.equal(styleProblem(id, t), null, `${id}: ${t}`);
+  }
+  assert.match(explainTemplate("savings", facts), /backup if a paycheck didn't come\. Right now it would pay your must-pay bills for about 2 weeks/);
+  assert.match(explainTemplate("card", facts), /APR is the yearly interest rate on what you owe\. On your \$2,400\.00 balance at 24%, that's about \$48\.00 a month/);
 });

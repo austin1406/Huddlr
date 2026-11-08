@@ -1,7 +1,7 @@
 // "Can you give me a summary of my account?" -> every account in one message, built in code from P1's facts
 // (so every number is exact and it costs no Gemini call), plus the user's priorities and any plan waiting for YES.
 import type { FactsSnapshot } from "../../contracts/src";
-import { cardMonthlyInterest, cast } from "./character";
+import { cardMonthlyInterest, cast, cushionWords } from "./character";
 import { describePriorities, type Priorities } from "./priorities";
 
 export const isSummaryQuestion = (text: string) =>
@@ -22,8 +22,8 @@ export function accountSummary(facts: FactsSnapshot, priorities: Priorities | nu
       ? `but short ${usd(s.amount)} on ${day(s.firstNegativeDate)}; a ${usd(s.suggestedTransfer)} transfer fixes it.`
       : `with ${usd(f.safeToSpendUntilPayday)} safe to spend until payday on ${day(f.nextPayday)}.`}`);
   const savings = a("savings");
-  const runway = facts.indicators.find((i) => i.id === "runway");
-  if (savings) lines.push(`${emoji("savings")} Savings: ${usd(savings.balance)}${runway ? `, about ${runway.value} months of essentials` : ""}.`);
+  const cushion = cushionWords(facts);
+  if (savings) lines.push(`${emoji("savings")} Savings: ${usd(savings.balance)}${cushion ? `, enough to cover ${cushion.span} of must-pay bills if your income stopped` : ""}.`);
   const card = a("card");
   const interest = cardMonthlyInterest(facts);
   if (card) lines.push(`${emoji("card")} Card: ${usd(card.balance)} owed${card.aprPercent ? ` at ${card.aprPercent}% APR` : ""}${interest ? `, about ${usd(interest)} a month in interest` : ""}.`);

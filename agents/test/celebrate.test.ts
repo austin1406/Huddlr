@@ -9,6 +9,7 @@ import { StubState } from "../../finance/src/state";
 import { celebration, celebrationTiming } from "../src/celebrate";
 import { handleChat, parseMention } from "../src/chat";
 import { checkMessage } from "../src/checker";
+import { cushionWords } from "../src/character";
 import { migrate } from "../src/db";
 import { runEvent, type DebateDeps } from "../src/debate";
 import { financeClient, type Finance } from "../src/finance";
@@ -30,10 +31,11 @@ test("saving, paying down debt, and investing each get a cheer from that account
     const cheer = celebration(event, facts, false);
     assert.equal(cheer?.speaker, speaker, to);
     assert.match(cheer!.text, /\$150\.00/);
-    const check = checkMessage(cheer!.text, facts, event.data);
+    const check = checkMessage(cheer!.text, facts, event.data, cushionWords(facts));
     assert.equal(check.ok, true, `${to}: ${cheer!.text} -> ${JSON.stringify(check)}`);
   }
-  assert.match(celebration(transfer("savings", 150), facts, false)!.text, /0\.45 months/);
+  assert.match(celebration(transfer("savings", 150), facts, false)!.text, /enough saved to cover about 2 weeks of must-pay bills/);
+  assert.doesNotMatch(celebration(transfer("savings", 150), facts, false)!.text, /months of essentials|runway/);
   assert.match(celebration(transfer("card", 150), facts, false)!.text, /\$2,400\.00 owed/);
 });
 

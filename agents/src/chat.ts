@@ -5,7 +5,7 @@ import { proposalFromPlan } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
 import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
-import { lowestBreakdown, speak } from "./character";
+import { explainTemplate, lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
@@ -96,8 +96,37 @@ async function recentConversation(db: Queryable, phone: string, inboundId: numbe
   // Who answered most recently: "where did I get 419 from?" is a question for them.
   const lastOut = [...rows].reverse().find((m) => m.direction === "out");
   const lastSpeaker = lastOut && (lastOut.speaker in ACCOUNT_NAMES || lastOut.speaker === "coach") ? (lastOut.speaker as CharacterId) : null;
-  return { lines, numbers, lastSpeaker };
+  return { lines, numbers, lastSpeaker, lastText: lastOut?.text ?? null };
 }
+
+/** "explain…", "what does APR mean", "what's utilization", "I don't get it", "in simple words". */
+export function isExplainRequest(text: string): boolean {
+  return /\b(explain|eli5|in simple (?:words|terms)|simpler|break (?:it|that) down|i don'?t (?:get|understand)|what (?:does|do) (?:\w+\s){0,4}mean|what(?:'s| is| are) (?:an? |the |my )?(?:apr|interest rate|utili[sz]ation|runway|cushion|buffer|employer match|match|shortfall|safe to spend|must-pay bills|essentials|ira|emergency fund|minimum payment))\b/i.test(text);
+}
+
+/** Who should explain a money word: the character it belongs to. */
+export function explainer(text: string): CharacterId | null {
+  const t = text.toLowerCase();
+  if (/\b(apr|interest|utili[sz]ation|credit|card|minimum payment)\b/.test(t)) return "card";
+  if (/\b(employer match|match|ira|retirement|401k)\b/.test(t)) return "ira";
+  if (/\b(cushion|runway|emergency fund|essentials|must-pay|savings)\b/.test(t)) return "savings";
+  if (/\b(shortfall|buffer|safe to spend|payday|lowest|checking|negative)\b/.test(t)) return "checking";
+  if (/\b(car loan|car payment|loan)\b/.test(t)) return "car_loan";
+  if (/\b(plan|yes|proposal)\b/.test(t)) return "coach";
+  return null;
+}
+
+/** Plain meanings the model can lean on, so "explain" answers are simple and right. */
+const GLOSSARY = [
+  `APR: the yearly interest rate on what you owe; each month the card charges about one twelfth of it on the balance.`,
+  `Credit utilization: how much of your card limit you're using; staying under 30% helps your credit score.`,
+  `Savings cushion: how long your savings would cover your must-pay bills if your income stopped.`,
+  `Buffer: the small amount you like to keep in Checking so it never hits zero.`,
+  `Employer match: your job adds money to your IRA when you put money in; any match you don't claim is free money left behind.`,
+  `Shortfall: Checking would dip below zero before your next paycheck.`,
+  `Safe to spend: what you can spend before payday and still keep your buffer.`,
+  `Must-pay bills: rent, utilities, phone, the car payment and the card minimum.`,
+].join(" ");
 
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
 export function pickResponder(text: string): CharacterId {
@@ -199,14 +228,23 @@ export async function handleChat(
   const mention = parseMention(text);
   const recent = await recentConversation(deps.db, deps.userPhone, inbound.id);
   const followUp = !mention && (sameWindfall || isFollowUp(text));
+  // "Explain APR", "what does that mean", "in simple words": the character the word belongs to explains it simply,
+  // or whoever just spoke if it's about their last message.
+  const explain = isExplainRequest(mention?.rest || text);
   const responder: CharacterId = mention?.who
-    ?? (sameWindfall ? "coach" : followUp && recent.lastSpeaker ? recent.lastSpeaker : followUp && pending ? "coach" : pickResponder(text));
+    ?? (sameWindfall ? "coach"
+      : explain && explainer(text) ? explainer(text)!
+      : followUp && recent.lastSpeaker ? recent.lastSpeaker
+      : followUp && pending ? "coach"
+      : pickResponder(text));
   // The Coach explaining the waiting plan is held to the debate rules (exact YES line, nobody wrongly "right").
-  const explainingPlan = responder === "coach" && followUp && pending != null;
+  const explainingPlan = responder === "coach" && followUp && pending != null && (!explain || explainer(text) === "coach" || !explainer(text));
   const question = mention ? mention.rest || "How am I doing with you right now?" : text;
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
-  const ask = mention
+  const ask = explain && !explainingPlan
+    ? `The user asked: "${question}". Explain it in simple words, like you're texting a friend who's new to money: up to 3 short sentences, no jargon, and use one of their real numbers from KEY NUMBERS as the example. If it's about something said earlier in the conversation below, explain that, and don't repeat it word for word: say it a new, simpler way, like an everyday comparison. Plain meanings you can use: ${GLOSSARY}`
+    : mention
     ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
     : followUp && !explainingPlan
       ? `The user texted: "${question}". They're asking about the conversation below, most likely your last message. Explain plainly where its numbers come from, step by step, using your KEY NUMBERS (for Checking: the balance now, the bills before the low point, everyday spending, and the lowest point). If your last message was a "can I afford" answer, its lowest balance already has that purchase taken out: say the lowest point without it, then that the purchase takes it to the number you gave. If they mixed up two numbers, say which is which using ALL BALANCES. Answer the question; skip your usual pitch this time.`
@@ -224,6 +262,8 @@ export async function handleChat(
   ].join("\n");
   const r = await speak(responder, facts, `${ask}${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}${context ? `\n${context}` : ""}`, {
     model: deps.model,
+    // "What does that mean?" must rephrase the last message, not repeat it (code-enforced, one retry).
+    ...((explain || followUp) && recent.lastText ? { avoidRepeating: [recent.lastText] } : {}),
     // The Coach explaining the waiting plan is held to the same code-enforced rules as in a debate: the exact YES line,
     // and nobody is called "right" who didn't speak just now (no "Savings is right because…" out of nowhere).
     ...(explainingPlan && pending ? { plan: pending.coachPlan, ask: pending.actionText, heard: [] } : {}),
@@ -238,6 +278,8 @@ export async function handleChat(
       ...(responder === "checking" ? [lowestBreakdown(facts)] : []),
     ],
   });
-  await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: r.text });
+  // An "explain" whose Gemini answer couldn't be sent gets a plain explanation, not the character's usual line.
+  const text2 = explain && !explainingPlan && r.source === "template" ? explainTemplate(responder, facts) : r.text;
+  await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: text2 });
   return { learned: 0, responder };
 }
