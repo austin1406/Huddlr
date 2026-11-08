@@ -1,7 +1,7 @@
 // A text that isn't an answer to a proposal: remember any goal or preference in it, then let the right
 // character answer (one speaker, grounded like everything else).
 import type { CharacterId, FactsSnapshot, Plan } from "../../contracts/src";
-import { speak } from "./character";
+import { lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
@@ -50,7 +50,7 @@ export function parseWindfall(text: string): { amount: number; label: string } |
 
 /** "why am I moving…", "what about the 600?", "so where do I put it??": a question about what was just proposed. */
 export function isFollowUp(text: string): boolean {
-  return /\b(why|what about|where (do|should|does) i|so where|which one|confus\w*|explain|instead|huh|wait|what does (that|this) mean|i don'?t get)\b|\?\?/i.test(text);
+  return /\b(why|what about|where (do|should|does|did) i|where'?d|so where|which one|confus\w*|explain|instead|huh|wait|what does (that|this) mean|i don'?t get|how (did|come|is that|so)|i thought|that'?s (not|wrong)|doesn'?t (add up|make sense)|what do you mean|wdym|(come|get|got) (that|it|\$?[\d,.]+) from|from where)\b|\?\?/i.test(text);
 }
 
 const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "Savings", card: "Card", car_loan: "Car Loan", ira: "IRA" };
@@ -87,7 +87,10 @@ async function recentConversation(db: Queryable, phone: string, inboundId: numbe
   const rows = r.rows.reverse();
   const lines = rows.map((m) => (m.direction === "in" ? `you: ${m.text}` : `${ACCOUNT_NAMES[m.speaker] ?? (m.speaker === "coach" ? "Coach" : m.speaker)}: ${m.text}`));
   const numbers = rows.flatMap((m) => extractNumbers(m.text).flatMap((n) => (n.value != null ? [n.value] : [])));
-  return { lines, numbers };
+  // Who answered most recently: "where did I get 419 from?" is a question for them.
+  const lastOut = [...rows].reverse().find((m) => m.direction === "out");
+  const lastSpeaker = lastOut && (lastOut.speaker in ACCOUNT_NAMES || lastOut.speaker === "coach") ? (lastOut.speaker as CharacterId) : null;
+  return { lines, numbers, lastSpeaker };
 }
 
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
@@ -145,21 +148,33 @@ export async function handleChat(
     return { learned: learned.length, responder: "coach" };
   }
 
-  // "@savings ..." picks the speaker; otherwise route by topic. A bare "@savings" is a check-in.
-  // A question about the plan that's waiting ("why am I moving $152?", "what about the 600?") goes to the Coach,
-  // who made the plan, unless the user tagged someone.
+  // Who answers, in order:
+  //   "@savings …"                          -> that character (a bare "@savings" is a check-in)
+  //   the same bonus again                  -> the Coach, explaining the plan that's waiting
+  //   a follow-up ("where did 419 come from?", "why?", "I thought I had 2500") -> whoever answered last
+  //   a follow-up with a plan waiting and no recent answer -> the Coach
+  //   anything else                         -> by topic
   const mention = parseMention(text);
-  const followUp = !mention && pending != null && (sameWindfall || isFollowUp(text));
-  const responder = mention?.who ?? (followUp ? "coach" : pickResponder(text));
+  const recent = await recentConversation(deps.db, deps.userPhone, inbound.id);
+  const followUp = !mention && (sameWindfall || isFollowUp(text));
+  const responder: CharacterId = mention?.who
+    ?? (sameWindfall ? "coach" : followUp && recent.lastSpeaker ? recent.lastSpeaker : followUp && pending ? "coach" : pickResponder(text));
+  // The Coach explaining the waiting plan is held to the debate rules (exact YES line, nobody wrongly "right").
+  const explainingPlan = responder === "coach" && followUp && pending != null;
   const question = mention ? mention.rest || "How am I doing with you right now?" : text;
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
-  const recent = await recentConversation(deps.db, deps.userPhone, inbound.id);
   const ask = mention
     ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
-    : `The user texted: "${question}". Answer them directly in character.`;
+    : followUp && !explainingPlan
+      ? `The user texted: "${question}". They're asking about the conversation below, most likely your last message. Explain plainly where its numbers come from, step by step, using your KEY NUMBERS (for Checking: the balance now, the bills before the low point, everyday spending, and the lowest point). If your last message was a "can I afford" answer, its lowest balance already has that purchase taken out: say the lowest point without it, then that the purchase takes it to the number you gave. If they mixed up two numbers, say which is which using ALL BALANCES. Answer the question; skip your usual pitch this time.`
+      : `The user texted: "${question}". Answer them directly in character.`;
+  const balances = facts.accounts
+    .map((a) => `${ACCOUNT_NAMES[a.id] ?? a.name} ${a.kind === "credit_card" || a.kind === "car_loan" ? "owed " : ""}$${a.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+    .join(", ");
   const context = [
     ...(recent.lines.length ? [`RECENT CONVERSATION (oldest first):`, ...recent.lines] : []),
+    ...(followUp ? [`ALL BALANCES: ${balances}.`] : []),
     ...(pending ? [`THE PLAN WAITING FOR THEIR YES: "${pending.actionText}". The full plan: ${pending.split}.`] : []),
     ...(recent.lines.length || pending
       ? [`Answer their latest text as part of this conversation, not from scratch. If they're confused about the plan, explain plainly what it does and why, with its numbers. Never contradict the waiting plan or invent a different one.`]
@@ -169,7 +184,7 @@ export async function handleChat(
     model: deps.model,
     // The Coach explaining the waiting plan is held to the same code-enforced rules as in a debate: the exact YES line,
     // and nobody is called "right" who didn't speak just now (no "Savings is right because…" out of nowhere).
-    ...(followUp && pending ? { plan: pending.coachPlan, ask: pending.actionText, heard: [] } : {}),
+    ...(explainingPlan && pending ? { plan: pending.coachPlan, ask: pending.actionText, heard: [] } : {}),
     // Numbers the user typed themselves ("can I afford $40?"), and numbers already said in this conversation
     // (each was grounded when it was sent), are fair to repeat back.
     extraSources: [
@@ -177,6 +192,8 @@ export async function handleChat(
       extractNumbers(text).flatMap((n) => (n.value != null ? [n.value] : [])),
       recent.numbers,
       ...(pending ? [pending.plan] : []),
+      ...(followUp ? [facts.accounts] : []),
+      ...(responder === "checking" ? [lowestBreakdown(facts)] : []),
     ],
   });
   await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: r.text });

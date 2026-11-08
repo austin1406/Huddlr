@@ -43,7 +43,7 @@ export function parseAffordQuestion(text: string): { amount: number; item: strin
   if (!/\bafford\b|\bcan i (buy|get|spend)\b|\bshould i (buy|get)\b/i.test(text)) return null;
   const money = extractNumbers(text).filter((n) => n.kind === "money");
   if (money.length !== 1 || !money[0].value || money[0].value <= 0) return null;
-  const item = text.match(/\$[\d,.]+k?\s+([a-z][a-z\s'-]{1,30}?)(?:\s+(?:tonight|today|now|this week)|[?.!]|$)/i)?.[1]?.trim() ?? null;
+  const item = text.match(/\$[\d,.]+k?\s+([a-z][a-z\s'-]{1,30}?)(?:\s+(?:tonight|tonite|tn|today|now|rn|tomorrow|tmrw|this week)|[?.!]|$)/i)?.[1]?.trim() ?? null;
   return { amount: money[0].value, item };
 }
 
