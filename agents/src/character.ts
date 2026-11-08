@@ -28,6 +28,30 @@ export function character(id: CharacterId): CastMember {
 
 const account = (facts: FactsSnapshot, id: Account["id"]) => facts.accounts.find((a) => a.id === id);
 const indicator = (facts: FactsSnapshot, id: IndicatorId) => facts.indicators.find((i) => i.id === id);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * How Checking gets from today's balance to its lowest point before payday, computed in code so Checking can show
+ * its math: balance now - bills due by then - everyday spending = lowest. Null if the numbers don't line up.
+ */
+export function lowestBreakdown(facts: FactsSnapshot) {
+  const start = account(facts, "checking")?.balance;
+  const low = facts.forecast.lowestBeforeNextPayday;
+  if (start == null || !low) return null;
+  const bills = facts.upcomingBills.filter((b) => b.dueDate >= facts.localDate && b.dueDate <= low.date);
+  const billsTotal = round2(bills.reduce((s, b) => s + b.amount, 0));
+  const everydaySpending = round2(start - billsTotal - low.balance);
+  if (everydaySpending < 0) return null;
+  return {
+    balanceNow: start,
+    billsBeforeLowest: bills.map((b) => ({ label: b.label, amount: b.amount, dueDate: b.dueDate })),
+    billsTotal,
+    everydaySpending,
+    lowest: low.balance,
+    lowestDate: low.date,
+    nextPayday: facts.forecast.nextPayday,
+  };
+}
 
 /**
  * Only the slice of facts this character talks about, so the model has less to mix up.
@@ -46,6 +70,7 @@ export function factsFor(id: CharacterId, facts: FactsSnapshot, event?: FinanceE
       cushion: f.cushion,
       upcomingBills: facts.upcomingBills,
       shortfall: facts.shortfall,
+      lowestBreakdown: lowestBreakdown(facts),
     },
     savings: { account: account(facts, "savings"), runway: indicator(facts, "runway"), savingsRate: indicator(facts, "savings_rate") },
     card: { account: account(facts, "card"), utilization: indicator(facts, "credit_utilization") },
@@ -78,6 +103,15 @@ export function keyNumbers(id: CharacterId, facts: FactsSnapshot, event?: Financ
       if (s) out.push(`short by ${fmtUsd(s.amount)} on ${fmtDate(s.firstNegativeDate)}`, `a transfer of ${fmtUsd(s.suggestedTransfer)} fixes it`);
       else out.push(`safe to spend until payday: ${fmtUsd(f.safeToSpendUntilPayday)}`);
       out.push(`next payday: ${fmtDate(f.nextPayday)}`);
+      {
+        const b = lowestBreakdown(facts);
+        if (b)
+          out.push(
+            `how your lowest point before payday is worked out: ${fmtUsd(b.balanceNow)} now, minus bills ${fmtUsd(b.billsTotal)}` +
+              (b.billsBeforeLowest.length ? ` (${b.billsBeforeLowest.map((x) => `${x.label} ${fmtUsd(x.amount)} on ${fmtDate(x.dueDate)}`).join(", ")})` : "") +
+              `, minus everyday spending ${fmtUsd(b.everydaySpending)}, leaves ${fmtUsd(b.lowest)} on ${fmtDate(b.lowestDate)}`,
+          );
+      }
       break;
     case "savings":
       out.push(`your balance: ${fmtUsd(a("savings")!.balance)}`, `cushion: ${ind("runway")!.value} months of essentials`);
@@ -240,12 +274,17 @@ export function coachProblem(
   ask?: string | null,
   heard?: Array<{ name: string; text: string }>,
 ): string | null {
-  if (id !== "coach" || !plan) return null;
+  if (id !== "coach") return null;
+  const crowned = [...text.matchAll(/\b(Checking|Savings|Card|Car Loan|IRA)\s+(?:is|was)\s+(?:also\s+)?right\b/gi)].map((m) => m[1].toLowerCase());
+  if (!plan) {
+    // No plan (a plain chat answer): only an account that just argued may be called "right".
+    const spoke = (n: string) => heard?.some((h) => h.name.toLowerCase() === n) ?? false;
+    return crowned.some((n) => !spoke(n)) ? `Don't say any account "is right"; nobody argued. Just answer the question.` : null;
+  }
   if (ask && !text.includes(`Reply YES to: ${ask}`)) return `It must end with exactly "Reply YES to: ${ask}."`;
   const first = plan.lines[0];
   if (!first) return null;
   const winner = destName(String(first.destination));
-  const crowned = [...text.matchAll(/\b(Checking|Savings|Card|Car Loan|IRA)\s+(?:is|was)\s+right\b/gi)].map((m) => m[1].toLowerCase());
   const winnerSpoke = heard?.some((h) => h.name === winner) ?? false;
   if (crowned.some((n) => n !== winner.toLowerCase()) || (crowned.length && !winnerSpoke))
     return winnerSpoke ? `Only ${winner} is right here; the plan sides with ${winner}.` : `Don't say any account "is right"; ${winner} didn't speak.`;
