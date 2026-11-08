@@ -104,7 +104,7 @@ every(env.pollMs, "inbound", async () => {
     if (result.kind === "chat") {
       const chat = await handleChat(
         {
-          db, facts: () => finance.facts(), userPhone: row.user_phone, finance,
+          db, facts: () => finance.facts(), userPhone: row.user_phone, finance, proposals,
           windfall: (ask, t) => runWindfall({ db, finance, proposals, userPhone: row.user_phone }, ask, t),
         },
         { id: Number(row.id), text: row.text },

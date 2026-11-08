@@ -4,7 +4,8 @@ import { CanIAffordResponse, ENDPOINTS, EventsResponse, FactsSnapshot, Plan, TOO
 export interface Finance {
   facts(): Promise<FactsSnapshot>;
   events(after?: string): Promise<FinanceEvent[]>;
-  plan(amount: number): Promise<Plan>;
+  /** `priorities` is the user's order (first..., then the rest, last...). P1's planner ignores it until it supports it. */
+  plan(amount: number, opts?: { priorities?: { first: string[]; last: string[] } | null }): Promise<Plan>;
   canIAfford(amount: number, label?: string): Promise<CanIAffordResponse>;
 }
 
@@ -25,7 +26,11 @@ export function financeClient(baseUrl: string, secret: string, timeoutMs = 4000,
     facts: async () => FactsSnapshot.parse(await call("GET", ENDPOINTS.facts.path)),
     events: async (after) =>
       EventsResponse.parse(await call("GET", `${ENDPOINTS.events.path}?limit=50${after ? `&after=${encodeURIComponent(after)}` : ""}`)).events,
-    plan: async (amount) => Plan.parse(await call("POST", ENDPOINTS.tools.get_plan.path, { amount })),
+    plan: async (amount, opts) =>
+      Plan.parse(await call("POST", ENDPOINTS.tools.get_plan.path, {
+        amount,
+        ...(opts?.priorities && (opts.priorities.first.length || opts.priorities.last.length) ? { priorities: { first: opts.priorities.first, last: opts.priorities.last } } : {}),
+      })),
     canIAfford: async (amount, label) => CanIAffordResponse.parse(await call("POST", ENDPOINTS.tools.can_i_afford.path, { amount, ...(label ? { label } : {}) })),
   };
 }

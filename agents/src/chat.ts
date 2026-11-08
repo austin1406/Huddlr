@@ -1,6 +1,10 @@
 // A text that isn't an answer to a proposal: remember any goal or preference in it, then let the right
 // character answer (one speaker, grounded like everything else).
-import type { CharacterId, FactsSnapshot, Plan } from "../../contracts/src";
+import type { CharacterId, FactsSnapshot, Plan, ProposalService } from "../../contracts/src";
+import { proposalFromPlan } from "./debate";
+import { scheduleProposalFollowUps } from "./followups";
+import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
+import { accountSummary, isSummaryQuestion } from "./summary";
 import { lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
@@ -58,8 +62,8 @@ const ACCOUNT_NAMES: Record<string, string> = { checking: "Checking", savings: "
 
 /** The pending proposal, with its plan spelled out in words (built from the plan's own numbers). */
 async function pendingPlan(db: Queryable, phone: string) {
-  const r = await db.query<{ action_text: string; source_event_id: string | null; plan: Plan | string }>(
-    "SELECT action_text, source_event_id, plan FROM proposals WHERE user_phone = $1 AND status = 'pending' ORDER BY id DESC LIMIT 1",
+  const r = await db.query<{ action_text: string; source_event_id: string | null; plan: Plan | string; to_account: string }>(
+    "SELECT action_text, source_event_id, plan, to_account FROM proposals WHERE user_phone = $1 AND status = 'pending' ORDER BY id DESC LIMIT 1",
     [phone],
   );
   const row = r.rows[0];
@@ -74,8 +78,9 @@ async function pendingPlan(db: Queryable, phone: string) {
       return `${usd(l.amount)} to ${to} (${l.reasonCode.replace(/_/g, " ")})`;
     })
     .join("; ");
-  // For the Coach's "who is right" rule (it follows the first line): for a bonus, lead with where money moves.
-  const coachPlan = windfall ? { ...plan, lines: [...plan.lines.filter((l) => l.destination !== "checking"), ...plan.lines.filter((l) => l.destination === "checking")] } : plan;
+  // For the Coach's "who is right" rule (it follows the first line): lead with the line the YES moves.
+  const yesLine = plan.lines.find((l) => l.destination === row.to_account && l.amount > 0) ?? null;
+  const coachPlan = leadWith(plan, yesLine);
   return { actionText: row.action_text, source: row.source_event_id, plan, coachPlan, planAmount: plan.amount, split };
 }
 
@@ -108,6 +113,8 @@ export function pickResponder(text: string): CharacterId {
 export async function handleChat(
   deps: {
     db: Queryable; facts: () => Promise<FactsSnapshot>; userPhone: string; model?: (p: string) => Promise<string>; finance?: Finance;
+    /** Re-points a waiting plan when the user states priorities. Without it, priorities are saved and confirmed only. */
+    proposals?: ProposalService;
     /** Runs the group debate for a windfall (debate.ts runWindfall). Without it, the question gets one answer. */
     windfall?: (ask: { inboundId: number; text: string; amount: number; label: string }, now: Date) => Promise<{ speakers: CharacterId[] }>;
   },
@@ -131,6 +138,40 @@ export async function handleChat(
   }
 
   const pending = await pendingPlan(deps.db, deps.userPhone);
+
+  // "Give me a summary of my account": every account in one message, built in code. No YES invite beyond
+  // naming the plan that's already waiting.
+  if (isSummaryQuestion(text) && (!parseMention(text) || parseMention(text)!.who === "coach")) {
+    const summary = accountSummary(await deps.facts(), await loadPriorities(deps.db, deps.userPhone), pending?.actionText ?? null);
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:summary`, speaker: "coach", text: summary });
+    return { learned: 0, responder: "coach" };
+  }
+
+  // "Prioritize my IRA over savings", "pay off the card first", "don't touch my savings": save it, confirm it, and
+  // re-point the plan that's waiting (if any) so its YES moves the user's top priority first.
+  const change = parsePriorities(parseMention(text)?.rest || text);
+  if (change) {
+    const merged = mergePriorities(await loadPriorities(deps.db, deps.userPhone), change);
+    await savePriorities(deps.db, deps.userPhone, merged, now);
+    let reply = priorityAck(change);
+    if (pending && deps.proposals && !change.clear) {
+      const windfallPlan = pending.source?.startsWith("chat_windfall_") ?? false;
+      const next = proposalFromPlan(pending.plan, merged, { windfall: windfallPlan });
+      const top = change.first?.[0];
+      const missing = top && !pending.plan.lines.some((l) => l.destination === top && l.amount > 0);
+      if (next && next.actionText !== pending.actionText) {
+        const created = await deps.proposals.create({ userPhone: deps.userPhone, plan: pending.plan, ...next, sourceEventId: pending.source });
+        if (created.proposal) await scheduleProposalFollowUps(deps.db, { userPhone: deps.userPhone, proposalId: Number(created.proposal.id), now, emergency: false });
+        reply += ` I've updated the plan. Reply YES to: ${next.actionText}.`;
+      } else if (missing) {
+        reply += ` The plan that's waiting doesn't put anything in ${NAMES[top]}; it goes first next time there's money to place. Still waiting on your YES: ${pending.actionText}.`;
+      } else {
+        reply += ` Your plan already starts there. Reply YES to: ${pending.actionText}.`;
+      }
+    }
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:priorities`, speaker: "coach", text: reply });
+    return { learned: 1, responder: "coach" };
+  }
 
   // "I got a $600 bonus, what should I do?" gets the whole crew: a debate and a plan to say YES to.
   // An @-mention means the user wants one voice, so it skips this. Asking again about the same bonus while its plan
