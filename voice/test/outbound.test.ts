@@ -108,7 +108,7 @@ test("post-call: links the request and treats no user speech as unanswered", () 
       type: "post_call_transcription",
       data: {
         conversation_id: "conv_out",
-        transcript: [{ role: "agent", message: "Hi Sreyas, it's the Coach." }],
+        transcript: [{ role: "agent", message: "Hi Maya, it's the Coach." }],
         conversation_initiation_client_data: { dynamic_variables: { call_request_id: "11" } },
       },
     },

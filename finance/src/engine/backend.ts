@@ -217,7 +217,7 @@ export class EngineBackend implements Backend, EngineOps {
     return this.current;
   }
 
-  /** normal: Sreyas's ordinary week. shortfall: checking $33 with payday 2 days away, so a $143 gap opens at once. */
+  /** normal: Maya's ordinary week. shortfall: checking $33 with payday 2 days away, so a $143 gap opens at once. */
   async setScenario(name: ScenarioName) {
     await this.restart(name === "shortfall" ? SHORTFALL_START : {}, name);
   }
