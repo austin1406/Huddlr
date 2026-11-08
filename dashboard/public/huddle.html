@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Money Huddle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Tokens: cool paper page, a deep navy table as the one bold object, green = money you have, raspberry = money you owe. */
+:root{
+  --page:#eef1f6; --surface:#ffffff; --line:#dde2ea; --ink:#132039; --muted:#5d677a; --hair:#dde2ea;
+  --table:#16284a; --table-hi:#22396a; --on-table:#f3f6fb;
+  --have:#1f8a6b; --owe:#cc4058; --good:#1f8a6b; --watch:#c98a06; --concern:#cc4058;
+  --good-soft:#e2f3ed; --watch-soft:#fbf1da; --concern-soft:#fbe5e9;
+  --accent:#2c56d8; --accent-ink:#ffffff; --focus:0 0 0 3px rgba(44,86,216,.35);
+  --lift:0 1px 2px rgba(19,32,57,.06),0 8px 24px rgba(19,32,57,.07);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --page:#0e1524; --surface:#162037; --line:#26324d; --ink:#eef2f9; --muted:#9aa6bc; --hair:#26324d;
+  --table:#1f3563; --table-hi:#2b4580; --on-table:#f3f6fb;
+  --have:#3cb592; --owe:#e8667c; --good:#3cb592; --watch:#e3a92a; --concern:#e8667c;
+  --good-soft:#13342c; --watch-soft:#3a2f12; --concern-soft:#3d1a24;
+  --accent:#7d9bff; --accent-ink:#0e1524; --lift:0 0 0 0 transparent;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--page);color:var(--ink);font:16px/1.5 Manrope,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:none;box-shadow:var(--focus);border-radius:12px}
+.num{font-variant-numeric:tabular-nums}
+main{max-width:1160px;margin:0 auto;padding:28px 24px 64px}
+@media (max-width:560px){main{padding:18px 16px 48px}}
+
+/* header */
+.bar{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.bar h1{font-size:clamp(24px,3.2vw,32px);font-weight:800;letter-spacing:-.02em;margin:0;line-height:1.15}
+.bar .asof{color:var(--muted);font-size:14px}
+
+/* layout: the table on the left, the conversation on the right */
+.hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(330px,1fr);gap:36px;align-items:start}
+@media (max-width:900px){.hero{grid-template-columns:minmax(0,1fr);gap:12px}}
+.hero > div{min-width:0}
+
+/* the round table */
+.stage{position:relative;width:100%;max-width:600px;aspect-ratio:1/1;margin:28px auto 0}
+@media (max-width:560px){.stage{margin-top:8px;aspect-ratio:1/1.08}.table{width:40%}}
+.table{position:absolute;left:50%;top:50%;width:47%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+  padding:9px;background:conic-gradient(var(--have) 0 var(--have-pct),var(--owe) var(--have-pct) 100%);
+  box-shadow:0 24px 48px -16px rgba(19,32,57,.45)}
+.table .top{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 30%,var(--table-hi),var(--table) 70%);
+  color:var(--on-table);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12%}
+.table .k{font-size:clamp(11px,2.6vw,13.5px);opacity:.72;font-weight:500}
+.table .nw{font-size:clamp(22px,5.6vw,36px);font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:2px 0 10px}
+.table .split{display:grid;gap:2px;font-size:clamp(11px,2.7vw,13.5px);font-weight:600}
+.table .split span{display:flex;align-items:center;gap:6px;justify-content:center;white-space:nowrap}
+.key{width:8px;height:8px;border-radius:50%}
+.key.h{background:var(--have)}.key.o{background:var(--owe)}
+
+.seat{position:absolute;transform:translate(-50%,-50%);width:clamp(96px,27%,150px);display:flex;flex-direction:column;align-items:center;
+  background:none;border:0;padding:0;cursor:pointer;transition:opacity .35s}
+.av{position:relative;width:clamp(58px,15vw,84px);aspect-ratio:1;border-radius:50%;overflow:hidden;background:var(--tint);
+  box-shadow:0 0 0 3px var(--surface),0 0 0 6px var(--ring),var(--lift);transition:transform .2s}
+.av svg{position:absolute;left:0;top:9%;width:100%}
+.seat:hover .av{transform:translateY(-2px)}
+.seat.good{--ring:var(--good)}.seat.watch{--ring:var(--watch)}.seat.concern{--ring:var(--concern)}
+.plate{margin-top:10px;text-align:center;line-height:1.25}
+.plate .n{font-size:clamp(12px,3.1vw,14px);font-weight:600;color:var(--muted);white-space:nowrap}
+.plate .b{font-size:clamp(15px,4vw,20px);font-weight:800;letter-spacing:-.01em}
+.plate .d{font-size:clamp(11px,2.9vw,12.5px);font-weight:700;white-space:nowrap}
+.plate .d.down{color:var(--concern)}.plate .d.up{color:var(--good)}
+.seat.quiet{opacity:.38}
+.seat.moved .av{animation:pulse 1.4s ease-out 1}
+@keyframes pulse{0%{box-shadow:0 0 0 3px var(--surface),0 0 0 6px var(--ring),0 0 0 6px var(--ring)}100%{box-shadow:0 0 0 3px var(--surface),0 0 0 6px var(--ring),0 0 0 22px transparent}}
+@media (prefers-reduced-motion:reduce){.seat.moved .av{animation:none}}
+.hint{text-align:center;color:var(--muted);font-size:13.5px;margin:-4px 0 0}
+
+/* right column */
+.panel{background:var(--surface);border-radius:20px;box-shadow:var(--lift);padding:22px;border:1px solid var(--hair)}
+.panel + .panel{margin-top:16px}
+.panel h2{font-size:18px;font-weight:700;letter-spacing:-.01em;margin:0 0 4px}
+.panel p.lede{margin:0 0 14px;color:var(--muted);font-size:14.5px}
+.ask{display:flex;gap:8px;background:var(--page);border:1px solid var(--hair);border-radius:14px;padding:6px}
+.ask:focus-within{box-shadow:var(--focus);border-color:var(--accent)}
+.ask input{flex:1;min-width:0;border:0;background:none;padding:10px 10px;font-size:16px;outline:none}
+.ask input::placeholder{color:var(--muted)}
+.go{border:0;border-radius:10px;padding:0 18px;background:var(--accent);color:var(--accent-ink);font-weight:700;cursor:pointer;white-space:nowrap}
+.go:disabled{opacity:.6;cursor:progress}
+.ideas{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.idea{border:1px solid var(--hair);background:none;border-radius:999px;padding:6px 12px;font-size:13.5px;color:var(--ink);cursor:pointer}
+.idea:hover{border-color:var(--accent);color:var(--accent)}
+.err-line{margin:10px 2px 0;color:var(--concern);font-size:14px}
+
+.verdict{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:14px;margin:12px 0 4px}
+.verdict.ok{background:var(--good-soft)}.verdict.no{background:var(--concern-soft)}
+.badge{flex:none;font-size:12.5px;font-weight:700;padding:3px 10px;border-radius:999px;margin-top:2px}
+.ok .badge{background:var(--good);color:#fff}.no .badge{background:var(--concern);color:#fff}
+.verdict p{margin:0;font-weight:600;font-size:15.5px}
+.replies{list-style:none;margin:8px 0 0;padding:0}
+.replies li{display:grid;grid-template-columns:40px 1fr;gap:12px;padding:12px 0;border-top:1px solid var(--hair)}
+.replies li:first-child{border-top:0}
+.mini{width:40px;height:40px;border-radius:50%;overflow:hidden;position:relative;background:var(--tint)}
+.mini svg{position:absolute;left:0;top:9%;width:100%}
+.replies .who{font-weight:700;font-size:14.5px}
+.replies .say{font-size:15px}
+.delta{display:inline-flex;gap:6px;align-items:center;margin-top:6px;font-size:13px;font-weight:600;color:var(--muted);background:var(--page);border-radius:8px;padding:3px 8px}
+.delta b{color:var(--ink)}
+.unchanged{color:var(--muted);font-size:14px;margin:10px 0 0}
+.clear{margin-top:14px;border:1px solid var(--hair);background:none;border-radius:10px;padding:8px 14px;font-weight:600;cursor:pointer}
+.move p{margin:0;font-size:16px;font-weight:600}
+.health{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:14px;color:var(--muted)}
+.health span{display:flex;align-items:center;gap:7px}
+.health i{width:9px;height:9px;border-radius:50%;display:inline-block}
+
+/* below the fold: forecast area (kept as is; a forecasting engine will replace it) */
+.section-title{font-size:18px;font-weight:700;margin:40px 0 12px;letter-spacing:-.01em}
+.tl{background:var(--surface);border:1px solid var(--hair);border-radius:20px;padding:16px;box-shadow:var(--lift)}
+.tl svg{width:100%;height:auto;display:block}
+.events{list-style:none;margin:10px 0 0;padding:0;font-size:14.5px;columns:2;column-gap:28px}
+@media (max-width:560px){.events{columns:1}}
+.events li{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--hair);break-inside:avoid}
+.events .d{color:var(--muted);width:56px;flex:none}.events .a{margin-left:auto}
+.plus{color:var(--good)}.minus{color:var(--ink)}
+.foot{font-size:13px;color:var(--muted);margin-top:28px;text-align:center}
+
+/* detail sheet */
+.scrim{position:fixed;inset:0;background:rgba(14,21,36,.45);display:none;align-items:flex-end;justify-content:center;z-index:9}
+.scrim.on{display:flex}
+.sheet{background:var(--surface);width:100%;max-width:480px;border-radius:22px 22px 0 0;padding:22px 22px calc(22px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;animation:rise .22s ease-out}
+@keyframes rise{from{transform:translateY(16px);opacity:.6}}
+@media (min-width:720px){.scrim{align-items:center}.sheet{border-radius:22px}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet .hd{display:flex;gap:14px;align-items:center}
+.sheet .hd .av{width:64px;flex:none;--ring:var(--hair)}
+.sheet .nm{font-weight:600;color:var(--muted)}
+.sheet .bal{font-size:28px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.pill{display:inline-block;font-size:12.5px;font-weight:700;padding:2px 9px;border-radius:999px;margin-top:4px}
+.pill.good{background:var(--good-soft);color:var(--good)}.pill.watch{background:var(--watch-soft);color:var(--watch)}.pill.concern{background:var(--concern-soft);color:var(--concern)}
+.quote{margin:16px 0 4px;font-size:15.5px;padding:12px 14px;background:var(--page);border-radius:12px}
+.rows{margin:8px 0 0;padding:0;list-style:none}
+.rows li{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair)}
+.rows small{display:block;color:var(--muted);font-size:13px}
+.rows .v{text-align:right;font-weight:700}
+.sheet h3{font-size:15px;margin:20px 0 0}
+.text{display:block;text-align:center;margin-top:18px;background:var(--accent);color:var(--accent-ink);text-decoration:none;padding:13px;border-radius:12px;font-weight:700}
+.x{float:right;width:34px;height:34px;border-radius:50%;border:0;background:var(--page);font-size:20px;line-height:1;color:var(--muted);cursor:pointer}
+.loading{padding:80px 0;text-align:center;color:var(--muted)}
+.bar .right{display:flex;align-items:center;gap:14px}
+.lock{border:1px solid var(--hair);background:var(--surface);border-radius:999px;padding:5px 12px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--muted)}
+.lock:hover{color:var(--ink)}
+
+/* sign in */
+.gate{min-height:calc(100vh - 120px);display:grid;place-items:center}
+.gate .card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--hair);border-radius:24px;box-shadow:var(--lift);padding:32px 28px;text-align:center}
+.gate .mark{width:72px;height:72px;margin:0 auto 18px;border-radius:50%;padding:6px;background:conic-gradient(var(--have) 0 38%,var(--owe) 38% 100%)}
+.gate .mark div{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 30%,var(--table-hi),var(--table) 70%);display:grid;place-items:center}
+.gate .mark svg{width:26px;height:26px}
+.gate h1{font-size:24px;font-weight:800;letter-spacing:-.02em;margin:0 0 8px}
+.gate p{margin:0;color:var(--muted);font-size:15px}
+.code{display:block;width:100%;margin:22px 0 12px;text-align:center;font-size:30px;font-weight:800;letter-spacing:.4em;padding:14px 0 14px .4em;
+  border:1px solid var(--hair);border-radius:14px;background:var(--page);font-variant-numeric:tabular-nums}
+.code:focus{outline:none;box-shadow:var(--focus);border-color:var(--accent)}
+.unlock{width:100%;border:0;border-radius:12px;padding:14px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:16px;cursor:pointer}
+.unlock:disabled{opacity:.6}
+.resend{margin-top:14px;background:none;border:0;color:var(--accent);font-weight:600;cursor:pointer;font-size:14.5px}
+.resend:disabled{color:var(--muted);cursor:default}
+.gate .err-line{margin:0 0 10px}
+.gate .fine{margin-top:20px;font-size:13px}
+</style>
+</head>
+<body>
+<main id="app"><div class="loading">Setting the table…</div></main>
+<div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-label="Account details"><div class="sheet" id="sheet"></div></div>
+
+<script>
+const API = location.pathname.replace(/\/$/, "") + "/api";
+let data = null, result = null, busy = false, question = "", notice = "";
+let login = null; // { hint, error, sending, wait } while signing in
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const money = (n) => { const a = Math.abs(n); return (n < 0 ? "-" : "") + "$" + a.toLocaleString("en-US", { minimumFractionDigits: a % 1 ? 2 : 0, maximumFractionDigits: 2 }); };
+const M = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const day = (iso) => { const [, m, d] = iso.split("-").map(Number); return `${M[m - 1]} ${d}`; };
+const statusWord = { good: "On track", watch: "Keep an eye on", concern: "Needs attention" };
+const TINT = { checking: "#d8efec", savings: "#f8dde2", ira: "#e1f0d9", card: "#e7e0f6", car_loan: "#fbe5d3" };
+
+/* ---------- the people (original simple illustrations) ---------- */
+const LOOK = {
+  checking: { skin: "#e8b48e", hair: "#3a2a20", shirt: "#2a9d8f", style: "short",  extra: "badge" },
+  savings:  { skin: "#c98d64", hair: "#1f1a17", shirt: "#e07a8b", style: "bun",    extra: "glasses" },
+  ira:      { skin: "#f1c9a5", hair: "#c9c4bc", shirt: "#5a9e4b", style: "gray",   extra: "sprout" },
+  card:     { skin: "#8d5a3c", hair: "#2b1d16", shirt: "#7b5cc4", style: "swoop",  extra: "earring" },
+  car_loan: { skin: "#d9a074", hair: "#5b3b26", shirt: "#e8833a", style: "short",  extra: "cap" },
+  coach:    { skin: "#b97a55", hair: "#1c1c1c", shirt: "#26407a", style: "short",  extra: "whistle" },
+};
+function figure(id, mood) {
+  const L = LOOK[id] || LOOK.checking;
+  const mouth = mood === "happy" ? `<path d="M41 70 Q50 79 59 70" stroke="#3b2418" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
+    : mood === "worried" ? `<path d="M42 74 Q50 67 58 74" stroke="#3b2418" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
+    : `<path d="M43 72 L57 72" stroke="#3b2418" stroke-width="2.6" stroke-linecap="round"/>`;
+  const brows = mood === "worried" ? `<path d="M36 50 L44 47 M64 50 L56 47" stroke="#3b2418" stroke-width="2.2" stroke-linecap="round"/>`
+    : `<path d="M36 48 L44 47 M56 47 L64 48" stroke="#3b2418" stroke-width="2.2" stroke-linecap="round"/>`;
+  const hair = {
+    short: `<path d="M27 52 Q26 26 50 25 Q74 26 73 52 Q70 38 50 37 Q31 38 27 52Z" fill="${L.hair}"/>`,
+    bun:   `<circle cx="50" cy="20" r="9" fill="${L.hair}"/><path d="M27 54 Q25 27 50 26 Q75 27 73 54 Q72 36 50 35 Q29 36 27 54Z" fill="${L.hair}"/>`,
+    gray:  `<path d="M26 56 Q24 30 50 27 Q76 30 74 56 Q73 42 66 38 Q50 44 34 38 Q27 42 26 56Z" fill="${L.hair}"/>`,
+    swoop: `<path d="M26 54 Q22 22 52 23 Q78 25 74 50 Q66 34 40 40 Q30 44 26 54Z" fill="${L.hair}"/>`,
+  }[L.style];
+  const extra = {
+    badge:   `<rect x="58" y="96" width="10" height="13" rx="2" fill="#fff" stroke="#1d3a37" stroke-width="1.5"/><path d="M63 96 L56 84" stroke="#1d3a37" stroke-width="1.5"/>`,
+    glasses: `<circle cx="41" cy="57" r="6.5" fill="none" stroke="#2b2b2b" stroke-width="2"/><circle cx="59" cy="57" r="6.5" fill="none" stroke="#2b2b2b" stroke-width="2"/><path d="M47.5 57 L52.5 57" stroke="#2b2b2b" stroke-width="2"/>`,
+    sprout:  `<path d="M38 100 L38 92" stroke="#2f6b2a" stroke-width="2"/><path d="M38 93 Q31 90 32 85 Q38 86 38 93Z M38 92 Q45 88 45 84 Q39 85 38 92Z" fill="#8fd16f"/>`,
+    earring: `<circle cx="27" cy="66" r="2.6" fill="#f2c94c"/>`,
+    cap:     `<path d="M26 44 Q28 25 50 24 Q72 25 74 44Z" fill="#334"/><path d="M60 42 Q76 41 82 46 L60 46Z" fill="#334"/>`,
+    whistle: `<path d="M38 86 Q50 100 62 86" stroke="#d8d8d8" stroke-width="1.6" fill="none"/><rect x="45" y="96" width="11" height="6" rx="3" fill="#cfd3d6"/>`,
+  }[L.extra];
+  return `<svg viewBox="0 0 100 112" role="img" aria-label="${id} feeling ${mood}">
+    <path d="M14 112 Q16 84 50 82 Q84 84 86 112Z" fill="${L.shirt}"/>
+    <rect x="44" y="72" width="12" height="13" rx="4" fill="${L.skin}"/>
+    <ellipse cx="50" cy="56" rx="23" ry="25" fill="${L.skin}"/>
+    <circle cx="27" cy="60" r="4" fill="${L.skin}"/><circle cx="73" cy="60" r="4" fill="${L.skin}"/>
+    ${hair}${L.extra === "cap" ? extra : ""}
+    <circle cx="41" cy="57" r="2.6" fill="#2a1a12"/><circle cx="59" cy="57" r="2.6" fill="#2a1a12"/>
+    ${brows}${mouth}
+    ${mood === "happy" ? `<circle cx="35" cy="66" r="3.5" fill="#ff8f8f" opacity=".35"/><circle cx="65" cy="66" r="3.5" fill="#ff8f8f" opacity=".35"/>` : ""}
+    ${L.extra !== "cap" ? extra : ""}
+  </svg>`;
+}
+
+/* ---------- render ---------- */
+
+// Five seats, evenly spaced (72° apart), starting at the top of the table.
+const ORDER = ["checking", "card", "car_loan", "ira", "savings"];
+function seat(p, i, n) {
+  const r = result?.reactions.find((x) => x.id === p.id);
+  const mood = r ? r.mood : p.mood;
+  const rad = ((-90 + (360 / n) * i) * Math.PI) / 180;
+  const tall = innerWidth <= 560; // phone: a slightly taller oval so name plates clear the table
+  const left = 50 + 37 * Math.cos(rad), top = 51 + (tall ? 39 : 37) * Math.sin(rad);
+  const cls = [p.status, result ? (r?.changed ? "moved" : "quiet") : ""].join(" ");
+  let d = `<div class="d" style="color:var(--muted);font-weight:600">${p.group === "owe" ? "owed" : "held"}</div>`;
+  if (r?.changed && r.after) {
+    const n0 = Number(String(r.before).replace(/[^\d.-]/g, "")), n1 = Number(String(r.after).replace(/[^\d.-]/g, ""));
+    const better = p.group === "owe" ? n1 < n0 : n1 > n0;
+    d = `<div class="d ${better ? "up" : "down"} num">${esc(r.after.replace(/^lowest /, "low "))}</div>`;
+  }
+  return `<button class="seat ${cls}" data-id="${p.id}" style="left:${left.toFixed(1)}%;top:${top.toFixed(1)}%;--tint:${TINT[p.id] || "#eee"}" aria-label="${esc(p.name)}: ${money(p.balance)}, ${statusWord[p.status]}. Open details.">
+    <div class="av">${figure(p.id, mood)}</div>
+    <div class="plate"><div class="n">${p.emoji} ${esc(p.name)}</div><div class="b num">${money(p.balance)}</div>${d}</div>
+  </button>`;
+}
+const mini = (id, mood) => `<div class="mini" style="--tint:${TINT[id] || "#eee"}">${figure(id, mood)}</div>`;
+
+function timeline(t) {
+  const W = Math.round(Math.max(340, Math.min(640, (innerWidth - 56) * 1.1))), H = W < 500 ? 230 : 190, pad = { l: 46, r: 10, t: 30, b: 22 };
+  const ds = t.days, n = ds.length;
+  const bals = ds.map((d) => d.balance);
+  const lo = Math.min(...bals, t.cushion, 0) < 0 ? Math.min(...bals) * 1.1 : Math.max(0, Math.min(...bals, t.cushion) - 120);
+  const hi = Math.max(...bals);
+  const x = (i) => pad.l + (i / (n - 1)) * (W - pad.l - pad.r);
+  const y = (v) => pad.t + (1 - (v - lo) / (hi - lo || 1)) * (H - pad.t - pad.b);
+  const idx = Object.fromEntries(ds.map((d, i) => [d.date, i]));
+  const path = ds.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(d.balance).toFixed(1)}`).join(" ");
+  const area = `${path} L${x(n - 1)} ${y(Math.max(lo, 0))} L${x(0)} ${y(Math.max(lo, 0))}Z`;
+  const em = Object.fromEntries([...data.huddle.people, data.huddle.coach].map((p) => [p.id, p.emoji]));
+  const marks = t.marks.filter((m) => idx[m.date] != null).map((m) => {
+    const i = idx[m.date], cx = x(i);
+    return `<line x1="${cx}" x2="${cx}" y1="${pad.t - 6}" y2="${H - pad.b}" stroke="${m.sign === "+" ? "var(--good)" : "var(--line)"}" stroke-width="${m.sign === "+" ? 1.5 : 1}" ${m.sign === "+" ? "" : 'stroke-dasharray="3 3"'}/>
+      <text x="${cx}" y="${pad.t - 10}" text-anchor="middle" font-size="14">${m.sign === "+" ? "💰" : em[m.who] || "•"}</text>`;
+  }).join("");
+  const ticks = (W < 500 ? [0, 14, 28, 41] : [0, 7, 14, 21, 28, 35, 41]).filter((i) => i < n).map((i, k, a) => `<text x="${x(i)}" y="${H - 5}" font-size="11" fill="var(--muted)" text-anchor="${k === a.length - 1 ? "end" : "middle"}">${day(ds[i].date)}</text>`).join("");
+  const yt = [hi, t.cushion, ...(lo < 0 ? [0] : [])].filter((v, i, a) => a.indexOf(v) === i).map((v) => `<text x="${pad.l - 6}" y="${y(v) + 4}" font-size="11" fill="var(--muted)" text-anchor="end">${money(Math.round(v))}</text>`).join("");
+  const low = ds.reduce((a, d, i) => (d.balance < a.v ? { v: d.balance, i } : a), { v: Infinity, i: 0 });
+  return `<svg viewBox="0 0 ${W} ${H}" aria-label="Checking balance for the next six weeks">
+    <path d="${area}" fill="var(--accent)" opacity=".08"/>
+    ${marks}
+    <line x1="${pad.l}" x2="${W - pad.r}" y1="${y(t.cushion)}" y2="${y(t.cushion)}" stroke="var(--watch)" stroke-dasharray="5 4"/>
+    <text x="${pad.l + 4}" y="${y(t.cushion) - 5}" font-size="11" fill="var(--watch)">cushion ${money(t.cushion)}</text>
+    ${lo < 0 ? `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--concern)"/>` : ""}
+    <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="${x(low.i)}" cy="${y(low.v)}" r="4.5" fill="${low.v < 0 ? "var(--concern)" : "var(--accent)"}"/>
+    <text x="${x(low.i) + (low.i > n * 0.55 ? -8 : 8)}" y="${y(low.v) - 8}" font-size="11.5" font-weight="600" text-anchor="${low.i > n * 0.55 ? "end" : "start"}" fill="var(--ink)">lowest ${money(low.v)} · ${day(ds[low.i].date)}</text>
+    ${ticks}${yt}
+  </svg>`;
+}
+
+
+const IDEAS = [
+  "What if I buy a $300 TV?",
+  "What if I add a $50 a month gym membership?",
+  "What if I move $200 into savings?",
+  "What if I pay $300 extra on my card?",
+  "What if I put $100 in my IRA?",
+  "What if I lost my paycheck for a month?",
+];
+
+function delta(r) {
+  const low = /^lowest /;
+  const label = low.test(r.before) ? "Lowest balance " : "";
+  return `<span class="delta num">${label}${esc(r.before.replace(low, ""))} → <b>${esc(r.after.replace(low, ""))}</b></span>`;
+}
+
+function rightColumn(h) {
+  const askPanel = `<section class="panel" aria-labelledby="ask-h">
+      <h2 id="ask-h">Ask the table</h2>
+      <p class="lede">Describe a money decision. Everyone at the table shows what it would do to them.</p>
+      <form class="ask" id="ask">
+        <input id="q" type="text" maxlength="300" autocomplete="off" placeholder="What if I buy a $400 phone?" value="${esc(question)}" aria-label="Your question">
+        <button class="go" ${busy ? "disabled" : ""}>${busy ? "Asking…" : "Ask"}</button>
+      </form>
+      ${notice ? `<p class="err-line">${esc(notice)}</p>` : ""}
+      ${result ? "" : `<div class="ideas">${IDEAS.map((x) => `<button class="idea" data-q="${esc(x)}">${esc(x.replace(/^What if I /, "").replace(/\?$/, ""))}</button>`).join("")}</div>`}
+    </section>`;
+  if (result) {
+    const moved = result.reactions.filter((r) => r.changed);
+    const still = result.reactions.filter((r) => !r.changed).map((r) => h.people.find((p) => p.id === r.id)?.name).filter(Boolean);
+    return askPanel + `<section class="panel" aria-live="polite">
+      <h2>${esc(result.title)}</h2>
+      <div class="verdict ${result.safe ? "ok" : "no"}"><span class="badge">${result.safe ? "Fits" : "Careful"}</span><p>${esc(result.verdict)}</p></div>
+      <ul class="replies">${moved.map((r) => {
+        const p = h.people.find((x) => x.id === r.id);
+        return p ? `<li>${mini(p.id, r.mood)}<div><div class="who">${p.emoji} ${esc(p.name)}</div><div class="say">${esc(r.text)}</div>${r.before && r.after ? delta(r) : ""}</div></li>` : "";
+      }).join("")}</ul>
+      ${still.length ? `<p class="unchanged">No change for ${esc(still.length > 1 ? still.slice(0, -1).join(", ") + " and " + still.at(-1) : still[0])}.</p>` : ""}
+      <button class="clear" id="reset">Clear and ask again</button>
+    </section>`;
+  }
+  const c = h.coach.counts;
+  return askPanel + `<section class="panel move">
+      <h2>Your next best move</h2>
+      <p>${esc(h.coach.bestMove)}</p>
+      <div class="health">
+        ${c.concern ? `<span><i style="background:var(--concern)"></i>${c.concern} needs attention</span>` : ""}
+        ${c.watch ? `<span><i style="background:var(--watch)"></i>${c.watch} to keep an eye on</span>` : ""}
+        ${c.good ? `<span><i style="background:var(--good)"></i>${c.good} on track</span>` : ""}
+      </div>
+    </section>`;
+}
+
+function render() {
+  const h = data.huddle;
+  const people = ORDER.map((id) => h.people.find((p) => p.id === id)).filter(Boolean)
+    .concat(h.people.filter((p) => !ORDER.includes(p.id)));
+  const havePct = ((h.have / (h.have + h.owe || 1)) * 100).toFixed(1);
+  $("#app").innerHTML = `
+    <header class="bar">
+      <h1>${esc(h.firstName ? h.firstName + "'s money, at one table" : "Your money, at one table")}</h1>
+      <span class="right"><span class="asof">As of ${esc(day(h.localDate))}</span><button class="lock" id="lock">Lock</button></span>
+    </header>
+    <div class="hero">
+      <div>
+        <div class="stage">
+          <div class="table" style="--have-pct:${havePct}%" role="img" aria-label="Net worth ${money(h.netWorth)}: you have ${money(h.have)} and owe ${money(h.owe)}">
+            <div class="top">
+              <div class="k">Net worth</div>
+              <div class="nw num">${money(h.netWorth)}</div>
+              <div class="split num"><span><i class="key h"></i>Have ${money(h.have)}</span><span><i class="key o"></i>Owe ${money(h.owe)}</span></div>
+            </div>
+          </div>
+          ${people.map((p, i) => seat(p, i, people.length)).join("")}
+        </div>
+        <p class="hint">Tap anyone for details</p>
+      </div>
+      <div>${rightColumn(h)}</div>
+    </div>
+
+    <h2 class="section-title">Next 6 weeks in Checking</h2>
+    <div class="tl">${timeline(h.timeline)}
+      <ul class="events">${h.timeline.marks.map((m) => {
+        const who = h.people.find((p) => p.id === m.who);
+        return `<li><span class="d">${day(m.date)}</span><span>${m.sign === "+" ? "💰" : who?.emoji || ""} ${esc(m.label)}</span><span class="a num ${m.sign === "+" ? "plus" : "minus"}">${m.sign === "+" ? "+" : "−"}${money(m.amount)}</span></li>`;
+      }).join("")}</ul>
+    </div>
+    <p class="foot">Nobody at this table can move your money. They explain and suggest; you decide.${data.source !== "live" ? " Showing sample data." : ""}</p>`;
+}
+
+function openSheet(id) {
+  const p = data.huddle.people.find((x) => x.id === id);
+  if (!p) return;
+  const sms = data.agentHandle ? `sms:${encodeURIComponent(data.agentHandle)}&body=${encodeURIComponent("@" + p.name + " ")}` : null;
+  $("#sheet").innerHTML = `<button class="x" aria-label="Close" id="close">×</button>
+    <div class="hd"><div class="av" style="--tint:${TINT[p.id]}">${figure(p.id, p.mood)}</div>
+      <div><div class="nm">${p.emoji} ${esc(p.name)}</div><div class="bal num">${money(p.balance)}</div><span class="pill ${p.status}">${statusWord[p.status]}</span></div></div>
+    <div class="quote">${esc(p.says)}</div>
+    <ul class="rows">${p.detail.map((r) => `<li><span>${esc(r.label)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span><span class="v num">${esc(r.value)}</span></li>`).join("")}</ul>
+    ${p.upcoming.length ? `<h3>Coming up</h3><ul class="rows">${p.upcoming.map((u) => `<li><span>${esc(u.label)}<small>${day(u.date)}</small></span><span class="v num ${u.sign === "+" ? "plus" : ""}">${u.sign === "+" ? "+" : "−"}${money(u.amount)}</span></li>`).join("")}</ul>` : ""}
+    ${sms ? `<a class="text" href="${sms}">Text ${esc(p.name)}</a>` : ""}`;
+  $("#scrim").classList.add("on");
+  $("#close").focus();
+}
+const closeSheet = () => $("#scrim").classList.remove("on");
+
+async function ask(text) {
+  question = text.trim();
+  if (!question) return $("#q").focus();
+  busy = true; notice = ""; render();
+  try {
+    const r = await fetch(API + "/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: question }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) { busy = false; return needLogin(j.hint || ""); }
+    if (!r.ok) notice = j.error || "That didn't go through. Try again.";
+    else if (!j.understood) notice = "Include an amount so the table can work it out, like “buy a $300 TV” or “move $200 to savings”.";
+    else result = j.result;
+  } catch { notice = "Can't reach the table right now. Check your connection and try again."; }
+  busy = false; render();
+  if (result && !notice && innerWidth < 900) $(".panel[aria-live]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+document.addEventListener("click", (e) => {
+  const idea = e.target.closest(".idea");
+  if (idea) return ask(idea.dataset.q);
+  if (e.target.id === "reset") { result = null; question = ""; render(); $("#q").focus(); return; }
+  if (e.target.id === "close" || e.target.id === "scrim") return closeSheet();
+  const s = e.target.closest(".seat");
+  if (s) openSheet(s.dataset.id);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+document.addEventListener("input", (e) => { if (e.target.id === "q") question = e.target.value; });
+document.addEventListener("submit", (e) => { if (e.target.id === "ask") { e.preventDefault(); ask($("#q").value); } });
+
+/* ---------- sign in: a code texted to the same iMessage chat ---------- */
+const AUTH = location.pathname.replace(/\/$/, "") + "/auth";
+const LOCK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="#f3f6fb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>`;
+function renderLogin() {
+  const L = login;
+  $("#app").innerHTML = `<div class="gate"><form class="card" id="unlock" autocomplete="on">
+      <div class="mark"><div>${LOCK_ICON}</div></div>
+      <h1>Verify it's you</h1>
+      <p>${L.sent ? `We texted a 6-digit code to your Huddlr chat (phone ${esc(L.hint)}).` : "We'll text a 6-digit code to your Huddlr chat."}</p>
+      <input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" placeholder="••••••" aria-label="6-digit code" value="${esc(L.typed || "")}">
+      ${L.error ? `<p class="err-line">${esc(L.error)}</p>` : ""}
+      <button class="unlock" ${L.busy ? "disabled" : ""}>${L.busy ? "Checking…" : "Unlock"}</button>
+      <button type="button" class="resend" id="resend" ${L.wait > 0 || L.sending ? "disabled" : ""}>${L.sending ? "Sending…" : L.wait > 0 ? `Send a new code in ${L.wait}s` : L.sent ? "Send a new code" : "Text me a code"}</button>
+      <p class="fine">You'll stay signed in on this device for 24 hours.</p>
+    </form></div>`;
+  $("#code").focus();
+}
+let tick;
+function countdown(seconds) {
+  login.wait = seconds;
+  clearInterval(tick);
+  tick = setInterval(() => {
+    if (!login) return clearInterval(tick);
+    login.wait = Math.max(0, login.wait - 1);
+    const b = $("#resend");
+    if (b) { b.disabled = login.wait > 0; b.textContent = login.wait > 0 ? `Send a new code in ${login.wait}s` : "Send a new code"; }
+    if (!login.wait) clearInterval(tick);
+  }, 1000);
+}
+async function sendCode() {
+  login.sending = true; login.error = ""; renderLogin();
+  try {
+    const r = await fetch(AUTH + "/send", { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    login.sending = false;
+    if (r.ok) { login.sent = true; login.hint = j.hint || login.hint; countdown(j.resendInSeconds || 30); }
+    else if (r.status === 404) return expiredView();
+    else { login.error = j.error || "Couldn't send a code. Try again."; if (j.retryInSeconds) { login.sent = true; countdown(Math.min(j.retryInSeconds, 3600)); } }
+  } catch { login.sending = false; login.error = "Couldn't reach the server. Check your connection."; }
+  renderLogin();
+}
+async function verify() {
+  const code = ($("#code").value || "").replace(/\D/g, "");
+  login.typed = code;
+  if (code.length !== 6) { login.error = "Enter all 6 digits."; return renderLogin(); }
+  login.busy = true; login.error = ""; renderLogin();
+  try {
+    const r = await fetch(AUTH + "/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) });
+    const j = await r.json().catch(() => ({}));
+    login.busy = false;
+    if (r.ok) { login = null; clearInterval(tick); $("#app").innerHTML = `<div class="loading">Setting the table…</div>`; return load(); }
+    if (r.status === 404) return expiredView();
+    login.error = j.error || "That code didn't work."; login.typed = "";
+  } catch { login.busy = false; login.error = "Couldn't reach the server. Check your connection."; }
+  renderLogin();
+}
+function needLogin(hint, autoSend = true) {
+  if (login) return;
+  data = null; result = null; closeSheet();
+  login = { hint, sent: false, wait: 0 };
+  renderLogin();
+  if (autoSend) sendCode(); // send right away; this only runs in a real browser, never in link previews
+}
+const expiredView = () => { login = null; $("#app").innerHTML = `<div class="loading"><h2>This link has expired</h2>Text “huddle link” to get a new one.</div>`; };
+document.addEventListener("submit", (e) => { if (e.target.id === "unlock") { e.preventDefault(); verify(); } });
+document.addEventListener("input", (e) => { if (e.target.id === "code") { const v = e.target.value.replace(/\D/g, "").slice(0, 6); e.target.value = v; if (v.length === 6) verify(); } });
+document.addEventListener("click", async (e) => {
+  if (e.target.id === "resend") sendCode();
+  if (e.target.id === "lock") { await fetch(AUTH + "/lock", { method: "POST" }).catch(() => {}); data = null; login = null; needLogin("", false); }
+});
+
+async function load() {
+  if (login) return;
+  try {
+    const r = await fetch(API);
+    if (r.status === 404) return expiredView();
+    if (r.status === 401) return needLogin((await r.json().catch(() => ({}))).hint || "");
+    data = await r.json();
+    if (!$("#scrim").classList.contains("on") && !result && !busy && document.activeElement?.id !== "q") render();
+  } catch { if (!data) $("#app").innerHTML = `<div class="loading">Can't load your table right now. Refresh to try again.</div>`; }
+}
+load();
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => data && !busy && render(), 150); });
+setInterval(load, 10000); // stays current while money moves (paused during a what-if)
+</script>
+</body>
+</html>

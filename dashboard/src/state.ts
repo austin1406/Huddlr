@@ -46,8 +46,11 @@ export async function loadChat(db: Db, phone: string, limit = 40): Promise<ChatL
   );
   return r.rows
     .reverse()
-    .map((x) => ({ at: new Date(x.at).toISOString(), from: x.from, text: x.text ?? "", status: x.status ?? undefined, photo: x.photo || undefined }));
+    .map((x) => ({ at: new Date(x.at).toISOString(), from: x.from, text: hideCodes(x.text ?? ""), status: x.status ?? undefined, photo: x.photo || undefined }));
 }
+
+/** Login codes show on the projector as ••••••. */
+export const hideCodes = (text: string) => text.replace(/(Huddle code is )\d{6}/, "$1••••••");
 
 /** Queue health: how many messages are waiting, held, failed, or went out. */
 export async function loadOutboxStats(db: Db): Promise<Record<string, number>> {
