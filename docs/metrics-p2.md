@@ -8,8 +8,8 @@ Latency numbers in this mode only measure our code (the test model answers insta
 |---|---|---|
 | Ungrounded numbers sent | 0 of 102 messages | 0 |
 | Debate lines: model / retry / template | 41% / 18% / 41% | info |
-| Time to first message (p50 / p90) | 3 ms / 4 ms | < 5000 ms |
-| Time to plan (p50 / p90) | 4 ms / 7 ms | < 15000 ms |
+| Time to first message (p50 / p90) | 3 ms / 3 ms | < 5000 ms |
+| Time to plan (p50 / p90) | 4 ms / 5 ms | < 15000 ms |
 | Proactive messages per day (max, demo off) | 6 | <= 6 |
 | Events held for the evening digest (demo off) | 17 of 24 (71%) | info |
 | Non-emergency messages during quiet hours | 0 | 0 |

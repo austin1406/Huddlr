@@ -14,6 +14,7 @@ import { maybeSendDigest, pollEvents, type DebateDeps } from "./debate";
 import { devRoutes } from "./dev";
 import { runFollowUps } from "./followups";
 import { financeClient } from "./finance";
+import { fileImageFetcher, geminiReader, handlePhoto, httpImageFetcher } from "./photo";
 import { makeProposalService } from "./proposals";
 import { handleInbound } from "./replies";
 
@@ -56,6 +57,8 @@ const now = async () => (await clock()).now;
 const proposals = makeProposalService(db, now);
 const finance = financeClient(env.financeUrl, env.secret);
 const debate: DebateDeps = { db, finance, proposals, userPhone: env.demoUserPhone, clock };
+// Photo bytes: P3's /photon/attachments/:id in production; locally the "attachment id" is a file path (/agents/dev/photo).
+const fetchImage = local ? fileImageFetcher : httpImageFetcher(process.env.PHOTON_URL || process.env.PUBLIC_BASE_URL || "http://localhost:3000", env.secret);
 
 const app = createApp({ db, proposals, secret: local ? "" : env.secret, demoUserPhone: env.demoUserPhone, now });
 if (local) devRoutes(app, { db, userPhone: env.demoUserPhone || "+15555550100", now, finance });
@@ -79,14 +82,24 @@ function every(ms: number, name: string, fn: () => Promise<void>) {
 
 // User texts (rows P3's webhook writes). Oldest first; handleInbound claims each row so nothing is handled twice.
 every(env.pollMs, "inbound", async () => {
-  const r = await db.query<{ id: number; user_phone: string; text: string | null }>(
-    "SELECT id, user_phone, text FROM inbound_messages WHERE processed_at IS NULL ORDER BY id LIMIT 20",
+  const r = await db.query<{ id: number; user_phone: string; text: string | null; attachment_ids: string[] | null }>(
+    "SELECT id, user_phone, text, attachment_ids FROM inbound_messages WHERE processed_at IS NULL ORDER BY id LIMIT 20",
   );
   for (const row of r.rows) {
     const at = await now();
+    // A photo with no text: read the item and price, then can_i_afford.
+    if (row.attachment_ids?.length && !row.text?.trim()) {
+      const p = await handlePhoto(
+        { db, finance, userPhone: row.user_phone, fetchImage, readPhoto: process.env.GEMINI_API_KEY ? geminiReader(process.env.GEMINI_API_KEY) : undefined },
+        { id: Number(row.id), user_phone: row.user_phone, attachment_ids: row.attachment_ids },
+        at,
+      );
+      if (p.kind !== "duplicate") console.log(`[agents] photo ${row.id}: ${p.kind}${p.amount != null ? ` ($${p.amount})` : ""}`);
+      continue;
+    }
     const result = await handleInbound(db, proposals, { ...row, id: Number(row.id) }, at);
     if (result.kind === "chat") {
-      const chat = await handleChat({ db, facts: () => finance.facts(), userPhone: row.user_phone }, { id: Number(row.id), text: row.text }, at);
+      const chat = await handleChat({ db, facts: () => finance.facts(), userPhone: row.user_phone, finance }, { id: Number(row.id), text: row.text }, at);
       console.log(`[agents] text ${row.id}: chat -> ${chat.responder}${chat.learned ? ` (saved ${chat.learned} to memory)` : ""}`);
     } else if (result.kind !== "duplicate") console.log(`[agents] text ${row.id}: ${result.kind}`);
   }

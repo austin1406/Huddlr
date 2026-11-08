@@ -59,6 +59,14 @@ finance isn't on localhost:4000).
 | A YES did nothing | no pending plan (expired after 2 h, or already accepted) | the Coach replies with the reason; check `GET /agents/proposals/pending` |
 | A call came after the user said YES | shouldn't happen: any YES/NO/transfer cancels pending `call_requests` | check `call_requests.status`; P4 should only call `pending` rows |
 
+## Photos and "can I afford it?"
+
+- A photo with no text: the image is fetched from P3 (`GET /photon/attachments/:id`, shared secret), Gemini reads only
+  the item and price (JSON), and Checking answers with P1's `can_i_afford` verdict. An unsure reading asks
+  "Is that $X for the item?" first; a missing price asks the user to text it.
+- "Can I afford a $40 dinner?" by text also goes straight to `can_i_afford`, so the answer is computed, not generated.
+- Locally: `curl -XPOST localhost:5055/agents/dev/photo -d '{"path":"test/fixtures/price-tag.png"}'`.
+
 ## Rules that are tested
 
 - 0 ungrounded numbers: Gate 1 (30 runs) runs in CI with a test model that invents a number in every other reply.
@@ -80,7 +88,9 @@ p50 711 ms / p90 990 ms, plan p50 2.3 s / p90 4.7 s, 0 ungrounded numbers.
 - Gemini runs on a free-tier key. If it's rate-limited, the chat still works with templates; a backup key can be
   dropped into `.env` and `pm2 restart agents --update-env`.
 - Formats are frozen: additive changes only (`contracts/src/agents.ts`, `contracts/p2_agents.sql`, `contracts/cast.json`).
-- Still open on P2's list: photo reading (first to cut), prompt polish after real-phone feedback.
+- Photos work end to end on P2's side; they need P3's `GET /photon/attachments/:id` (shared secret, returns the image
+  bytes) to fetch the image. Until then a photo gets "text me the price" instead of silence.
+- Still open: prompt polish after real-phone feedback.
 
 ## Safety text for Devpost
 

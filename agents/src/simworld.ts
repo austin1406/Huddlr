@@ -39,7 +39,7 @@ export async function world(opts: { scenario: "normal" | "shortfall"; at?: strin
     );
     const id = Number(r.rows[0].id);
     const res = await handleInbound(db, proposals, { id, user_phone: SIM_PHONE, text: body }, now());
-    if (res.kind === "chat") await handleChat({ db, facts: () => finance.facts(), userPhone: SIM_PHONE, model: opts.model }, { id, text: body }, now());
+    if (res.kind === "chat") await handleChat({ db, facts: () => finance.facts(), userPhone: SIM_PHONE, model: opts.model, finance }, { id, text: body }, now());
     return res;
   };
   const outbox = async () =>
@@ -70,7 +70,12 @@ export async function ungroundedIn(w: World): Promise<string[]> {
       const p = await w.db.query<{ plan: unknown }>("SELECT plan FROM proposals WHERE id = $1", [m.proposal_id]);
       if (p.rows[0]) sources.push(Plan.parse(typeof p.rows[0].plan === "string" ? JSON.parse(p.rows[0].plan as string) : p.rows[0].plan));
     }
-    if (m.reply_to != null) sources.push(extractNumbers(said.get(Number(m.reply_to)) ?? "").map((f) => f.value ?? 0));
+    if (m.reply_to != null) {
+      const typed = extractNumbers(said.get(Number(m.reply_to)) ?? "").map((f) => f.value ?? 0);
+      sources.push(typed);
+      // Affordability answers quote P1's can_i_afford result for the amount the user typed.
+      for (const amount of typed.filter((v) => v > 3)) sources.push(await w.finance.canIAfford(amount).catch(() => null));
+    }
     if (m.speaker === "coach" && !m.event_id) sources.push(w.facts); // Coach acks and digests are templated from the facts
     const r = checkMessage(m.text, ...sources);
     if (!r.ok) bad.push(`${m.speaker}: "${m.text}" -> ${r.ungrounded.map((u) => u.raw).join(", ")}`);

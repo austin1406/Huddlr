@@ -112,3 +112,13 @@ Last real run: 20 messages, 0 ungrounded numbers, median 557 ms to the first mes
 `npm run gate2` (test model) and `npm run gate2 -- --real --chats 12` (real Gemini, paced) print the table and write
 `docs/metrics-p2.md` / `docs/metrics-p2-real.md`. Grounding, restraint (3 simulated days, demo mode off), safety
 (ambiguous replies never approve), and escalation (silent shortfalls get a call, answered ones never do).
+
+## Photos, affordability, recall
+
+- `src/photo.ts`: photo -> Gemini reads item and price -> P1's `can_i_afford` answers. Needs P3's
+  `GET /photon/attachments/:id`; `scripts/try-photo.ts <image>` runs the real vision call on a local file.
+- "Can I afford $X?" texts are answered by `can_i_afford` directly. "What did we decide?" comes from the last call
+  summary and latest plan (`src/recall.ts`).
+- Prompt tuning: each character gets pre-formatted key numbers and a stance (`wants` in `contracts/cast.json`); the
+  Coach answers what the accounts said, and a code rule enforces its "Reply YES to: …" line.
+  `scripts/sample-debates.ts` prints real-Gemini debates for review.
