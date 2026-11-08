@@ -191,6 +191,9 @@ export async function handleChat(
 
   // Several things in one text ("can I buy dinner tonight and then take a loan out for a house?"): the roundtable
   // answers each part, so the single-topic shortcuts below don't take just one piece of it.
+  // "hey", "thanks!", "lol ok": small talk gets a short, friendly reply from the Coach, not the whole table (phone test:
+  // "hey" got "Good question." and four accounts' pitches).
+  const smallTalk = isSmallTalk(text);
   const multiTopic = !parseMention(text) && /\b(and|then|also|plus)\b/i.test(text) && accountsInQuestion(text).length >= 2;
 
   // "Can I afford $40?" (or a price after a photo) is answered by P1's can_i_afford, not by the model.
@@ -300,7 +303,7 @@ export async function handleChat(
       : followUp && pending ? "coach"
       : pickResponder(text));
   // The Coach explaining the waiting plan is held to the debate rules (exact YES line, nobody wrongly "right").
-  const explainingPlan = responder === "coach" && followUp && pending != null && (!explain || explainer(text) === "coach" || !explainer(text));
+  const explainingPlan = !smallTalk && responder === "coach" && followUp && pending != null && (!explain || explainer(text) === "coach" || !explainer(text));
   const question = mention ? mention.rest || "How am I doing with you right now?" : text;
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
@@ -310,7 +313,9 @@ export async function handleChat(
   const thinkingAboutLoan = responder === "car_loan" &&
     (homeQuestion || /\b(if i|can i|could i|should i|am i able to|thinking (?:of|about)|planning to|want to|wanna|going to|gonna)\b[^.?!]*\b(take out|take|get|apply for|borrow|sign|qualify for)\b[^.?!]*\b(loan|mortgage)/i.test(question));
   const homeCheck = homeQuestion ? homeLoanCheckText(facts, await loadReportedLoans(deps.db, deps.userPhone)) : "";
-  const ask = explain && !explainingPlan
+  const ask = smallTalk
+    ? `The user just texted "${question}". That's small talk, not a money question. Text back like a friend in the group chat: one short, warm line, then offer help in a few words (for example, ask what's on their mind, or mention one real number from KEY NUMBERS that's worth knowing today). Up to 2 short sentences. Don't give a bottom line, a plan, or a list.`
+    : explain && !explainingPlan
     ? `The user asked: "${question}". Explain it in simple words, like you're texting a friend who's new to money: up to 3 short sentences, no jargon, and use one of their real numbers from KEY NUMBERS as the example. If it's about something said earlier in the conversation below, explain that, and don't repeat it word for word: say it a new, simpler way, like an everyday comparison. Plain meanings you can use: ${GLOSSARY}`
     : mention && !thinkingAboutLoan
     ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
@@ -345,7 +350,7 @@ export async function handleChat(
   // A question naming two or more accounts ("card or savings first?") also gets the table, not just one of them.
   const general = responder === "coach" || accountsInQuestion(text).length >= 2;
   // A house question with no @-mention gets the whole table (down payment, credit, current loans, budget).
-  if (((general && !followUp && !explain && !explainingPlan && !thinkingAboutLoan) || multiTopic || homeQuestion) && !mention && deps.roundtable) {
+  if (!smallTalk && ((general && !followUp && !explain && !explainingPlan && !thinkingAboutLoan) || multiTopic || homeQuestion) && !mention && deps.roundtable) {
     // Facts for each part, computed in code: a purchase with a price gets P1's can_i_afford verdict; a loan they're
     // thinking about gets what to check before signing and what's safe to spend.
     const parts: string[] = [];
@@ -409,6 +414,7 @@ export async function handleChat(
   //   an "explain" gets a plain explanation; "thinking about a new loan" gets what to check before signing.
   let text2 =
     r.source !== "template" ? r.text
+    : smallTalk ? SMALL_TALK_FALLBACK
     : thinkingAboutLoan ? loanAdviceText(facts)
     : explain && !explainingPlan ? explainTemplate(responder, facts)
     : r.text;
@@ -420,3 +426,12 @@ export async function handleChat(
   const why = r.source === "template" ? r.attempts.map((a) => a.error ?? (a.ok === false ? `ungrounded ${JSON.stringify(a.ungrounded?.map((u) => u.raw) ?? [])}` : "")).filter(Boolean).join("; ") || "no time left" : undefined;
   return { learned: 0, responder, source: r.source, ...(why ? { why } : {}) };
 }
+
+/** "hey", "hi there", "thanks!", "ok cool", "lol", "good morning": nothing to answer about money. */
+export function isSmallTalk(text: string): boolean {
+  const t = text.toLowerCase().replace(/[^a-z' ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t || t.split(" ").length > 5) return false;
+  return /^(?:(?:hey+|hi+|hello+|yo+|sup|wassup|what'?s up|hiya|howdy|good (?:morning|afternoon|evening|night)|gm|gn|thanks?|thank you|thx|ty|ok(?:ay)?|k|cool|nice|great|awesome|got it|sounds good|lol|lmao|haha+|bye|see ya|later|guys|everyone|all|y'?all|team|huddlr|there)\s*)+$/.test(t);
+}
+
+const SMALL_TALK_FALLBACK = "Hey! What's on your mind? Ask about any account, or tag one of us like @savings.";
