@@ -3,7 +3,7 @@
 import type { CharacterId, FactsSnapshot, Plan, ProposalService } from "../../contracts/src";
 import { proposalFromPlan, type Waiting } from "./debate";
 import { scheduleProposalFollowUps } from "./followups";
-import { leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
+import { allMovesText, leadWith, loadPriorities, mergePriorities, NAMES, parsePriorities, priorityAck, savePriorities } from "./priorities";
 import { accountSummary, isSummaryQuestion } from "./summary";
 import { bottomLine } from "./bottomline";
 import { isBottomLineQuestion } from "./replies";
@@ -285,7 +285,7 @@ export async function handleChat(
     ...((explain || followUp) && recent.lastText ? { avoidRepeating: [recent.lastText] } : {}),
     // The Coach explaining the waiting plan is held to the same code-enforced rules as in a debate: the exact YES line,
     // and nobody is called "right" who didn't speak just now (no "Savings is right because…" out of nowhere).
-    ...(explainingPlan && pending ? { plan: pending.coachPlan, ask: pending.actionText, heard: [] } : {}),
+    ...(explainingPlan && pending ? { plan: pending.coachPlan, ask: allMovesText(pending.coachPlan, pending.coachPlan.lines[0] ?? null, { windfall: pending.source?.startsWith("chat_windfall_") ?? false }) ?? pending.actionText, heard: [] } : {}),
     // Numbers the user typed themselves ("can I afford $40?"), and numbers already said in this conversation
     // (each was grounded when it was sent), are fair to repeat back.
     extraSources: [

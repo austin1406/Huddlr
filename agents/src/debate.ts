@@ -9,7 +9,7 @@
 import { localDate, type CharacterId, type FactsSnapshot, type FinanceEvent, type Plan, type ProposalService } from "../../contracts/src";
 import { bottomLine } from "./bottomline";
 import { celebration, celebrationTiming } from "./celebrate";
-import { describePriorities, fromFor, leadWith, loadPriorities, pickLine, type Priorities } from "./priorities";
+import { allMovesText, describePriorities, fromFor, leadWith, loadPriorities, pickLine, type Priorities } from "./priorities";
 import { character, config, speak, type SpeakResult } from "./character";
 import type { Queryable } from "./db";
 import type { Finance } from "./finance";
@@ -216,7 +216,8 @@ export async function runEvent(deps: DebateDeps, event: FinanceEvent): Promise<D
   if (coachPrep) {
     const { plan, ask, proposalId } = await coachPrep;
     const line = await speak("coach", facts, situation("coach", event, plan != null), {
-      event, plan, ask: ask?.actionText ?? null, heard, model: deps.model, deadline: started + config.debate.plan_target_ms,
+      // Every move in the plan, lead first: the user makes them all in their bank app.
+      event, plan, ask: plan && ask ? (allMovesText(plan, plan.lines[0] ?? null) ?? ask.actionText) : null, heard, model: deps.model, deadline: started + config.debate.plan_target_ms,
     });
     await queue("coach", line.text, proposalId);
     result.planMs = Date.now() - started;
@@ -383,11 +384,11 @@ export async function runWindfall(
       }),
     (id, text, replyToOutbox) => queue(id, text, null, replyToOutbox));
 
-  // 3. The Coach closes with the plan and the YES.
+  // 3. The Coach closes with the bottom line and every move to make.
   let line: { text: string };
   if (proposalId != null)
-    line = await speak("coach", facts, `The accounts each gave an option for the user's ${usd(ask.amount)}. ${money}${describePriorities(prefs) ? ` The user told us their priorities: ${describePriorities(prefs)}; the YES below follows them, so say so in a few words.` : ""} The plan: ${split}. Explain that split in plain words, naming each part with its own amount exactly as written here (no other amounts, no "remaining"), and why, then give the YES line.`, {
-      event, plan: coachPlan, ask: proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
+    line = await speak("coach", facts, `The accounts each gave an option for the user's ${usd(ask.amount)}. ${money}${describePriorities(prefs) ? ` The user told us their priorities: ${describePriorities(prefs)}; the order of the moves follows them, so say so in a few words.` : ""} The plan: ${split}. Explain that split in plain words, naming each part with its own amount exactly as written here (no other amounts, no "remaining"), and why, then end with the moves line.`, {
+      event, plan: coachPlan, ask: (coachPlan ? allMovesText(coachPlan, main ?? null, { windfall: true }) : null) ?? proposal!.actionText, heard, model: deps.model, deadline: started + config.debate.plan_target_ms, extraSources,
     });
   else if (plan && !main && keep > 0)
     // Everything stays in Checking: nothing to move, so nothing to say YES to.

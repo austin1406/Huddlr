@@ -1,6 +1,9 @@
 // "So what should I do?" -> one clear answer: the single action, why in plain words, and what else the plan
 // suggests. Built in code from the waiting proposal and P1's facts, so it's instant, exact, and never vague.
 import type { FactsSnapshot, Plan, PlanLine } from "../../contracts/src";
+import { allMovesText } from "./priorities";
+
+const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const day = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -30,20 +33,18 @@ export function whyLine(l: PlanLine): string {
 }
 
 /**
- * The bottom line. With a plan waiting: "Bottom line: move … in your bank app." plus why, plus the rest of the plan
- * as something they can do later. The Coach can't move money, so it never asks for a YES. With nothing waiting: whether anything needs doing right now.
+ * The bottom line. With a plan waiting: "Bottom line: move $150.00 from Checking to IRA and $450.00 from Checking
+ * to Card in your bank app." (every move, the lead one first) plus why the lead one matters. The Coach can't move
+ * money, so it never asks for a YES. With nothing waiting: whether anything needs doing right now.
  */
 export function bottomLine(facts: FactsSnapshot, waiting: { actionText: string; to: string; plan: Plan; windfall: boolean } | null): string {
   if (waiting) {
     const yes = waiting.plan.lines.find((l) => l.destination === waiting.to && l.amount > 0);
-    const rest = waiting.plan.lines.filter((l) => l !== yes && l.amount > 0 && !String(l.destination).startsWith("goal:"));
-    const keep = waiting.windfall ? rest.filter((l) => l.destination === "checking") : [];
-    const later = rest.filter((l) => !keep.includes(l));
+    const keep = waiting.windfall ? waiting.plan.lines.filter((l) => l.destination === "checking" && l.amount > 0) : [];
     return [
-      `Bottom line: ${waiting.actionText.charAt(0).toLowerCase()}${waiting.actionText.slice(1)} in your bank app.`,
+      `Bottom line: ${lower(allMovesText(waiting.plan, yes ?? null, { windfall: waiting.windfall }) ?? waiting.actionText)} in your bank app.`,
       ...(yes ? [whyLine(yes)] : []),
       ...keep.map((l) => `Keep ${usd(l.amount)} in Checking so you're not short before payday.`),
-      ...(later.length ? [`The plan also suggests ${later.map((l) => `${usd(l.amount)} to ${NAME[String(l.destination)] ?? String(l.destination)}`).join(" and ")} whenever you're ready.`] : []),
       `I'll check it off when I see the transfer.`,
     ].join(" ");
   }
