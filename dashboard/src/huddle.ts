@@ -67,6 +67,21 @@ export function statusFor(ind: { direction: string; goodAt: number; concernAt: n
 }
 
 const BILL_OWNER: Record<string, string> = { car_loan: "car_loan", card_minimum: "card" };
+/** Accounts with their own hand-written seat. Every other account still gets a seat (see below). */
+const KNOWN = new Set(["checking", "savings", "card", "car_loan", "ira"]);
+/** Every kind of loan (student, personal, auto, ...) sits with the one Loan person. A mortgage keeps its own seat. */
+const isLoanKind = (kind: string) => /loan/i.test(kind) && !/mortgage/i.test(kind);
+const OWE_KINDS = /loan|mortgage|credit|debt|line_of_credit/i;
+const DEFAULT_LOOK: Record<string, { name: string; emoji: string }> = {
+  cd: { name: "CD", emoji: "🔒" },
+  mortgage: { name: "Mortgage", emoji: "🏠" },
+  brokerage: { name: "Investments", emoji: "📈" },
+  hsa: { name: "HSA", emoji: "🩺" },
+};
+const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** A loan the user told the chat about (P2's memory_facts, key loan:<name>). */
+export type ReportedLoan = { label: string; owed?: number; aprPercent?: number; monthlyPayment?: number };
 
 function castInfo(cast: any[], id: string) {
   const c = cast.find((x) => x.id === id);
@@ -74,7 +89,7 @@ function castInfo(cast: any[], id: string) {
 }
 
 // ---------- the huddle ----------
-export function buildHuddle(facts: any, cast: any[]): Huddle {
+export function buildHuddle(facts: any, cast: any[], extras: { reportedLoans?: ReportedLoan[] } = {}): Huddle {
   const acct = (id: string) => facts.accounts.find((a: any) => a.id === id);
   const ind = (id: string) => facts.indicators.find((i: any) => i.id === id);
   const f = facts.forecast;
@@ -198,28 +213,74 @@ export function buildHuddle(facts: any, cast: any[]): Huddle {
     });
   }
 
-  // Car loan: the steady one. Worried only if Checking runs out before its payment.
+  // Loan: every loan in one person. The bank's loan (P1's car loan) plus loans the user told the chat about
+  // (P2 keeps those in memory_facts). Worried only if Checking runs out before the bank loan's payment.
   const car = acct("car_loan");
-  if (car) {
+  const extraLoans = facts.accounts.filter((a: any) => !KNOWN.has(a.id) && isLoanKind(a.kind));
+  const told = (extras.reportedLoans ?? []).filter((l) => l && typeof l.label === "string");
+  if (car || extraLoans.length || told.length) {
     const bill = bills.find((b) => b.id === "car_loan");
     const atRisk = !!(bill && f.firstNegativeDate && f.firstNegativeDate <= bill.dueDate);
     const status: Status = atRisk ? "concern" : "good";
-    const cheaper = card && (car.aprPercent ?? 0) < (card.aprPercent ?? 0);
+    const cheaper = car && card && (car.aprPercent ?? 0) < (card.aprPercent ?? 0);
+    const loans = [
+      ...(car ? [{ label: "Car loan", owed: car.balance, apr: car.aprPercent, monthly: car.monthlyPayment, told: false }] : []),
+      ...extraLoans.map((a: any) => ({ label: a.name, owed: a.balance, apr: a.aprPercent, monthly: a.monthlyPayment, told: false })),
+      ...told.map((l) => ({ label: titleCase(l.label), owed: l.owed, apr: l.aprPercent, monthly: l.monthlyPayment, told: true })),
+    ];
+    const total = roundMoney(loans.reduce((sum, l) => sum + (l.owed ?? 0), 0));
+    const many = loans.length > 1;
     people.push({
       ...base("car_loan", "owe"),
-      balance: car.balance,
+      balance: total,
       status,
       mood: moodOf[status],
       says: atRisk
-        ? `My ${money(bill!.amount)} payment is due ${day(bill!.dueDate)}, but Checking runs short before then.`
-        : `You owe ${money(car.balance)}. ${bill ? `${money(bill.amount)} is due ${day(bill.dueDate)}. ` : ""}${cheaper ? "My rate is lower than the card's, so on-time payments are enough." : ""}`.trim(),
+        ? `The car loan's ${money(bill!.amount)} payment is due ${day(bill!.dueDate)}, but Checking runs short before then.`
+        : many
+          ? `You owe ${money(total)} across ${loans.length} loans.${bill ? ` The car loan's ${money(bill.amount)} is due ${day(bill.dueDate)}.` : ""}`
+          : `You owe ${money(total)}. ${bill ? `${money(bill.amount)} is due ${day(bill.dueDate)}. ` : ""}${cheaper ? "My rate is lower than the card's, so on-time payments are enough." : ""}`.trim(),
       detail: [
-        { label: "You owe", value: money(car.balance) },
-        { label: "Interest rate", value: `${car.aprPercent}%` },
-        ...(car.monthlyPayment != null ? [{ label: "Monthly payment", value: money(car.monthlyPayment) }] : []),
-        ...(bill ? [{ label: "Next payment", value: `${money(bill.amount)} on ${day(bill.dueDate)}` }] : []),
+        ...(many ? [{ label: "Total owed", value: money(total), note: `${loans.length} loans` }] : []),
+        ...loans.map((l) => ({
+          label: many ? l.label : "You owe",
+          value: l.owed != null ? money(l.owed) : "amount not given",
+          note: [l.apr != null ? `${l.apr}% interest` : "", l.monthly != null ? `${money(l.monthly)} a month` : "", l.told ? "you told us by text" : ""].filter(Boolean).join(", ") || undefined,
+        })),
+        ...(bill ? [{ label: "Next car loan payment", value: `${money(bill.amount)} on ${day(bill.dueDate)}` }] : []),
+        ...(told.length ? [{ label: "Loans you told us about", value: String(told.length), note: "not in your bank data, so not in the forecast" }] : []),
       ],
       upcoming: bill ? [{ date: bill.dueDate, label: bill.label, amount: bill.amount, sign: "-" }] : [],
+    });
+  }
+
+  // Anything else the bank data adds (a CD, a mortgage, ...) gets its own seat.
+  for (const a of facts.accounts.filter((x: any) => !KNOWN.has(x.id) && !isLoanKind(x.kind))) {
+    const owes = OWE_KINDS.test(a.kind);
+    const c = cast.find((x) => x.id === a.characterId || x.id === a.id);
+    const look = DEFAULT_LOOK[a.kind] ?? { name: a.name, emoji: owes ? "📄" : "💼" };
+    const rate = a.aprPercent != null ? `${a.aprPercent}%` : null;
+    const until = a.maturityDate ? day(a.maturityDate) : null;
+    people.push({
+      id: a.id,
+      group: owes ? "owe" : "have",
+      name: c?.name ?? a.name ?? look.name,
+      emoji: c?.emoji ?? look.emoji,
+      balance: a.balance,
+      status: "good",
+      mood: "happy",
+      says: owes
+        ? `You owe ${money(a.balance)}.${a.monthlyPayment != null ? ` ${money(a.monthlyPayment)} a month.` : ""}${rate ? ` My rate is ${rate}.` : ""}`
+        : a.kind === "cd"
+          ? `I hold ${money(a.balance)}${rate ? ` at ${rate}` : ""}${until ? `, locked until ${until}` : ""}. Taking it out early costs a penalty.`
+          : `I hold ${money(a.balance)}.`,
+      detail: [
+        { label: owes ? "You owe" : "Balance now", value: money(a.balance) },
+        ...(rate ? [{ label: "Interest rate", value: rate }] : []),
+        ...(a.monthlyPayment != null ? [{ label: "Monthly payment", value: money(a.monthlyPayment) }] : []),
+        ...(until ? [{ label: "Locked until", value: until }] : []),
+      ],
+      upcoming: [],
     });
   }
 
@@ -355,7 +416,7 @@ function checkingDeltas(f: any, d: Decision): number[] {
 
 type WhatIf = (scenario: unknown) => Promise<any>;
 
-export async function decide(facts: any, d: Decision, whatIf: WhatIf): Promise<DecisionResult> {
+export async function decide(facts: any, d: Decision, whatIf: WhatIf, extras: { reportedLoans?: ReportedLoan[] } = {}): Promise<DecisionResult> {
   const f = facts.forecast;
   const acct = (id: string) => facts.accounts.find((a: any) => a.id === id);
   const ind = (id: string) => facts.indicators.find((i: any) => i.id === id);
@@ -533,18 +594,24 @@ export async function decide(facts: any, d: Decision, whatIf: WhatIf): Promise<D
       const card = acct("card");
       const pay = Math.min(d.amount, car?.balance ?? d.amount);
       const saved = roundMoney((pay * (car?.aprPercent ?? 0)) / 1200);
+      // The Loan seat shows every loan together, so its before/after is the total.
+      const total = roundMoney(
+        (car?.balance ?? 0) +
+          facts.accounts.filter((a: any) => !KNOWN.has(a.id) && isLoanKind(a.kind)).reduce((n: number, a: any) => n + a.balance, 0) +
+          (extras.reportedLoans ?? []).reduce((n, l) => n + (l.owed ?? 0), 0),
+      );
       reactions.car_loan = {
         id: "car_loan",
         mood: neg ? "worried" : "happy",
-        text: `You'd owe ${money(roundMoney((car?.balance ?? 0) - pay))}. That saves about ${money(saved)} a month in interest.`,
-        before: money(car?.balance ?? 0),
-        after: money(roundMoney((car?.balance ?? 0) - pay)),
+        text: `The car loan drops to ${money(roundMoney((car?.balance ?? 0) - pay))}. That saves about ${money(saved)} a month in interest.`,
+        before: money(total),
+        after: money(roundMoney(total - pay)),
         changed: true,
       };
       const cardFirst = card && card.balance > 0 && (card.aprPercent ?? 0) > (car?.aprPercent ?? 0);
       if (cardFirst)
         reactions.card = { id: "card", mood: "okay", text: `Paying me instead saves more: my rate is ${card.aprPercent}% vs ${car?.aprPercent}%.`, changed: true };
-      title = `If you pay ${money(pay)} extra on the car loan`;
+      title = `If you pay ${money(pay)} extra on your car loan`;
       verdict = fromChecking(cardFirst ? `It helps, but the same money on the card saves more interest.` : `Good move. Checking can afford it.`);
       break;
     }

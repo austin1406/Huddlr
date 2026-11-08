@@ -43,3 +43,14 @@ test("queue stats and proposals", async () => {
 test("phones are masked for the projector", () => {
   assert.equal(maskPhone("+19453365104"), "•••-5104");
 });
+
+test("loans told by text are read for the Huddle and the team dashboard", async () => {
+  const { loadReportedLoans } = await import("../src/state.js");
+  const d = await db();
+  await d.query(
+    `INSERT INTO memory_facts (user_phone, kind, key, value, source, created_sim_at, updated_sim_at) VALUES ($1, 'note', 'loan:tuition', $2, 'text', now(), now())`,
+    [PHONE, JSON.stringify({ label: "tuition", owed: 10000, aprPercent: 5 })],
+  );
+  assert.deepEqual(await loadReportedLoans(d, PHONE), [{ label: "tuition", owed: 10000, aprPercent: 5 }]);
+  assert.deepEqual(await loadReportedLoans(d, "+19999999999"), []);
+});
