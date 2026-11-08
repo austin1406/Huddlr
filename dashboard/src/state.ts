@@ -32,6 +32,56 @@ export async function loadFacts(financeUrl: string, secret: string, useFixture: 
   }
 }
 
+const PRESET_DAYS: Record<string, number> = { "1m": 30, "6m": 181, "1y": 365, "5y": 1826, "10y": 3652 };
+const WINDOW_DAYS = { days: 1, weeks: 7, months: 30.4375, years: 365.25 } as const;
+
+const MAX_WINDOW = { days: 3650, weeks: 520, months: 120, years: 10 } as const;
+
+/** A window from the page: a whole number of days, weeks, months or years, up to 10 years. Null if it is not one. */
+export function parseWindow(body: unknown): { amount: number; unit: keyof typeof MAX_WINDOW; compare: boolean } | null {
+  const b = body as { amount?: unknown; unit?: unknown; compare?: unknown } | null;
+  const unit = b?.unit as keyof typeof MAX_WINDOW;
+  const amount = b?.amount;
+  if (!unit || !(unit in MAX_WINDOW) || typeof amount !== "number" || !Number.isInteger(amount) || amount < 1 || amount > MAX_WINDOW[unit]) return null;
+  return { amount, unit, compare: b?.compare !== false };
+}
+
+/** Sample-mode projection: the preset closest to the window asked for. The page says so, since only presets are available. */
+export function projectionFixture(req: { amount: number; unit: keyof typeof WINDOW_DAYS }): { projection: any; exact: boolean } {
+  const all = JSON.parse(readFileSync(fileURLToPath(new URL("../../contracts/fixtures/projection.fixture.json", import.meta.url)), "utf8"));
+  const want = req.amount * WINDOW_DAYS[req.unit];
+  const key = Object.keys(PRESET_DAYS).reduce((a, k) => (Math.abs(PRESET_DAYS[k] - want) < Math.abs(PRESET_DAYS[a] - want) ? k : a));
+  const projection = all[key];
+  const exact = Math.abs(projection.days - want) <= Math.max(2, want * 0.02);
+  return { projection, exact };
+}
+
+/** P1's long-range projection for a window. Live finance when reachable; otherwise the sample fixture (local preview). */
+export async function loadProjection(
+  financeUrl: string,
+  secret: string,
+  useFixture: boolean,
+  req: { amount: number; unit: "days" | "weeks" | "months" | "years"; compare?: boolean },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ projection: any; source: string; exact: boolean }> {
+  if (!useFixture) {
+    try {
+      const res = await fetchImpl(`${financeUrl.replace(/\/$/, "")}/tools/project`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(secret ? { "x-huddlr-secret": secret } : {}) },
+        body: JSON.stringify(req),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) throw new Error(`finance ${res.status}`);
+      return { projection: await res.json(), source: "live", exact: true };
+    } catch (err) {
+      const f = projectionFixture(req);
+      return { ...f, source: `fixture (finance unavailable: ${(err as Error).message})` };
+    }
+  }
+  return { ...projectionFixture(req), source: "fixture" };
+}
+
 /** The demo user's conversation: what they sent and what the cast sent back, oldest first. */
 export async function loadChat(db: Db, phone: string, limit = 40): Promise<ChatLine[]> {
   const r = await db.query<{ at: Date; from: string; text: string | null; status: string | null; photo: boolean }>(

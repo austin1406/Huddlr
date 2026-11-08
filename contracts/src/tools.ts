@@ -26,6 +26,11 @@ export const ENDPOINTS = {
   facts: { method: "GET", path: "/facts" },
   events: { method: "GET", path: "/events" },
   health: { method: "GET", path: "/health" },
+  /**
+   * Long-range projection (see projection.ts). A separate key on purpose: it is not a voice or agent tool, so it is not in
+   * ToolName, which the voice service must cover exhaustively. Routed by Caddy under /tools/*.
+   */
+  project: { method: "POST", path: "/tools/project" },
   tools: {
     get_snapshot: { method: "POST", path: "/tools/get_snapshot" },
     can_i_afford: { method: "POST", path: "/tools/can_i_afford" },

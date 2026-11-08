@@ -2,6 +2,7 @@ export * from "./common";
 export * from "./events";
 export * from "./facts";
 export * from "./plan";
+export * from "./projection";
 export * from "./scenarios";
 export * from "./tools";
 export * from "./time";

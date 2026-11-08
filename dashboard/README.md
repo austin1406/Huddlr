@@ -53,7 +53,8 @@ built from P1's numbers (no AI, so every number is exact). Under the table: your
   If Gemini is down or unsure, simple word rules take over. Everyone at the table reacts (faces change, the people
   affected bounce) and their replies show under a plain "bottom line". Max 12 questions a minute per link.
 - **Tap a person** for their details, what's coming up, and a "Text them" button that opens iMessage to the agent number.
-- **Next 6 weeks**: Checking's forecast with paydays and bills marked by who they belong to.
+- **Where this is heading** (replaces the old "Next 6 weeks" chart): every account over a window the user picks (a number plus days, weeks, months or years, or a preset: 1 month, 6 months, 1 year, 5 years, 10 years; up to 10 years). A plain sentence says where net worth goes if nothing changes; a chart shows the current course and, with the toggle on, the Coach's plan; milestone chips show when the card and loan are paid off; tiles show net worth, interest paid and the emergency fund; a table shows where each account ends up; "What this assumes" lists every assumption. Drag across the chart to read any date.
+  The page calls `POST /me/<token>/api/project` (same login), which calls P1's `POST /tools/project`. In sample mode (`DASHBOARD_FIXTURE=1`, or finance unreachable) it serves `contracts/fixtures/projection.fixture.json`, which only has the presets, so a custom window shows the closest preset and says so. The fixture is checked against the engine by a test in `finance/` (regenerate with `cd finance && npx tsx scripts/gen-projection-fixture.ts`).
 
 ### Who sits at the table
 

@@ -120,7 +120,7 @@ every(env.pollMs, "inbound", async () => {
         { id: Number(row.id), text: row.text },
         at,
       );
-      console.log(`[agents] text ${row.id}: chat -> ${chat.debate ? `debate (${chat.debate.join(", ")})` : chat.responder}${chat.learned ? ` (saved ${chat.learned} to memory)` : ""}`);
+      console.log(`[agents] text ${row.id}: chat -> ${chat.debate ? `debate (${chat.debate.join(", ")})` : chat.responder}${chat.learned ? ` (saved ${chat.learned} to memory)` : ""}${chat.source === "template" ? ` [fallback: ${chat.why}]` : ""}`);
     } else if (result.kind !== "duplicate") console.log(`[agents] text ${row.id}: ${result.kind}`);
   }
   await proposals.expireStale();
