@@ -59,6 +59,8 @@ Read this honestly: day-to-day spending is so noisy (about $49 against a $38 ave
 
 **Calibration.** When spending is steady, the 80% range contains 79% of what actually happened over the next 14 days (tested between 72% and 88%). After a sudden change in habits it undercovers (52% to 67% in the backtest) because the estimate takes a few weeks to catch up. The page says so.
 
+**A finding the simulation produced.** The first version of the Coach's month-end sweep kept only a month of bills plus the $100 cushion in checking. Run through the simulated futures, that plan overdrew checking at some point in 66% of 5-year futures, against 29% for doing nothing (which is mostly the thin first month). So the sweep now also leaves room for random spending: 2 standard deviations of a month of everyday spending, about $530. That brings the plan to 31% (level with doing nothing), at a cost of about $70 of final net worth and a card payoff one month later (Mar 2027 instead of Feb); 3, 4 or 5 standard deviations bought almost nothing more. This is the projection's policy for the Coach's plan; the live optimizer still plans each windfall separately.
+
 **What this does not do.** It does not predict raises, inflation, market returns (off unless asked), or new debts the engine is never told about. The 45-day forecast behind `/facts` still uses the flat average; only the projection is learned.
 
 ## Running it

@@ -125,3 +125,13 @@ test("a subscription the engine was never told about is found and included", asy
   const gap = simple.current.points.at(-1)!.checking - learned.current.points.at(-1)!.checking;
   assert.ok(Math.abs(gap - 150) < 1, `checking is ${gap} lower, expected 150`);
 });
+
+test("the Coach plan leaves room for random spending, so it is not riskier than doing nothing", async () => {
+  // Found by simulation: with no room above a month of bills and the cushion, the plan overdrew checking in 66% of
+  // 5-year futures against 29% for doing nothing. Leaving two standard deviations of a month's spending closes the gap.
+  const r = await run(await engine(), 5, "years", { compare: true });
+  const current = r.current.uncertainty!.probCheckingNegative, coach = r.coach!.uncertainty!.probCheckingNegative;
+  assert.ok(coach <= current + 0.06, `coach ${coach} vs current ${current}`);
+  assert.ok(r.coach!.assumptions.some((a) => /room for random spending/.test(a)));
+  assert.ok(r.difference!.netWorth > 0, "and it still ends ahead");
+});

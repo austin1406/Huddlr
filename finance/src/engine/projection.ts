@@ -6,8 +6,18 @@ import { monthlyEssentials } from "./facts";
 import { planV1 } from "./optimizer";
 import { fitSpendModel, hashSeed, makeDaySampler, mulberry32, type Recurring, type SpendModel } from "./spending";
 
+/**
+ * How much room the Coach's sweep leaves for random spending, in standard deviations of a month of everyday spending.
+ * With no room (0) the simulated plan overdrew checking in 66% of 5-year futures against 29% for doing nothing. Two
+ * standard deviations (about $530) brings that to 31% for about $70 of final net worth and a one-month-later card payoff;
+ * more room bought almost nothing. See docs/finance.md.
+ */
+export const POLICY = { bufferZ: 2 };
+
 export interface ProjectionOptions {
   days: number;
+  /** Extra dollars the Coach's sweep leaves in checking, on top of a month of bills and the cushion. */
+  bufferMargin?: number;
   iraReturnPercent: number;
   savingsApyPercent: number;
 }
@@ -121,7 +131,7 @@ function runPath(
   const a = persona.accounts;
   const bal: Balances = { checking: state.balances.checking, savings: state.balances.savings, ira: state.balances.ira, card: state.balances.card, carLoan: state.balances.car_loan };
   const cushion = THRESHOLDS.cushion;
-  const buffer = r2(persona.recurringBills.reduce((s, b) => s + b.amount, 0) + cushion);
+  const buffer = r2(persona.recurringBills.reduce((s, b) => s + b.amount, 0) + cushion + (opts.bufferMargin ?? 0));
 
   const goals = persona.goals.map((g) => ({ ...g }));
   let unclaimedMatch = a.ira.unclaimedMatchThisYear;
@@ -238,6 +248,7 @@ function projectOne(
   const mean = learned ? choice.model!.level.mean : flat;
   const recurring = learned ? choice.model!.recurring : [];
 
+  if (strategy === "coach" && learned) opts = { ...opts, bufferMargin: POLICY.bufferZ * choice.model!.level.sd * Math.sqrt(30) };
   const cal = buildCalendar(state, persona, today, opts.days, recurring);
   // The expected path: spending at its learned level every day.
   const path = runPath(strategy, state, persona, facts, today, opts, () => mean, cal, false);
@@ -295,9 +306,10 @@ function projectOne(
     "The IRA and car loan are simulated; loans you add by text are not included.",
   ];
   if (strategy === "coach") {
-    const buffer = r2(monthlyBills + THRESHOLDS.cushion);
+    const margin = opts.bufferMargin ?? 0;
+    const buffer = r2(monthlyBills + THRESHOLDS.cushion + margin);
     assumptions.push(
-      `At each month end, money in checking above ${usd(buffer)} (a month of bills plus the ${usd(THRESHOLDS.cushion)} cushion) is sent by the Coach's plan: employer match, then the card, then the emergency fund, goals, and the rest.`,
+      `At each month end, money in checking above ${usd(buffer)} (a month of bills, the ${usd(THRESHOLDS.cushion)} cushion${margin > 0 ? ` and about ${usd(margin)} of room for random spending` : ""}) is sent by the Coach's plan: employer match, then the card, then the emergency fund, goals, and the rest.`,
     );
   }
   if (uncertainty) {
