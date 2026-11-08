@@ -272,13 +272,17 @@ export async function handleChat(
   const question = mention ? mention.rest || "How am I doing with you right now?" : text;
   const facts = await deps.facts();
   const goals = (await loadMemory(deps.db, deps.userPhone)).filter((m) => m.kind === "goal");
+  // "What do I do if I want to take out a tuition loan?": advice about a loan they don't have yet.
+  const thinkingAboutLoan = responder === "car_loan" && /\b(if i|should i|thinking (?:of|about)|planning to|want to|wanna|going to|gonna)\b[^.?!]*\b(take out|take|get|apply for|borrow|sign)\b[^.?!]*\bloan/i.test(question);
   const ask = explain && !explainingPlan
     ? `The user asked: "${question}". Explain it in simple words, like you're texting a friend who's new to money: up to 3 short sentences, no jargon, and use one of their real numbers from KEY NUMBERS as the example. If it's about something said earlier in the conversation below, explain that, and don't repeat it word for word: say it a new, simpler way, like an everyday comparison. Plain meanings you can use: ${GLOSSARY}`
     : mention
     ? `The user tagged you directly and asked: "${question}". Only you answer, in your own voice, from your account's point of view.`
     : followUp && !explainingPlan
       ? `The user texted: "${question}". They're asking about the conversation below, most likely your last message. Explain plainly where its numbers come from, step by step, using your KEY NUMBERS (for Checking: the balance now, the bills before the low point, everyday spending, and the lowest point). If your last message was a "can I afford" answer, its lowest balance already has that purchase taken out: say the lowest point without it, then that the purchase takes it to the number you gave. If they mixed up two numbers, say which is which using ALL BALANCES. Answer the question; skip your usual pitch this time.`
-      : `The user texted: "${question}". Answer them directly in character.`;
+      : thinkingAboutLoan
+        ? `The user texted: "${question}". They're thinking about taking out a new loan. Answer that question, not anything else: say plainly what to check before signing (how much, the interest rate, the monthly payment, and whether that payment fits their budget), using one or two of their real numbers (like what's safe to spend until payday, or the payment on the loan they already have). End by offering to break it down if they text the amount, rate and monthly payment. Up to 3 short sentences.`
+        : `The user texted: "${question}". Answer them directly in character.`;
   const reported = responder === "car_loan" ? await loadReportedLoans(deps.db, deps.userPhone) : [];
   const balances = facts.accounts
     .map((a) => `${ACCOUNT_NAMES[a.id] ?? a.name} ${a.kind === "credit_card" || a.kind === "car_loan" ? "owed " : ""}$${a.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
@@ -286,6 +290,9 @@ export async function handleChat(
   const context = [
     ...(recent.lines.length ? [`RECENT CONVERSATION (oldest first):`, ...recent.lines] : []),
     ...(followUp ? [`ALL BALANCES: ${balances}.`] : []),
+    ...(thinkingAboutLoan
+      ? [`SAFE TO SPEND UNTIL PAYDAY: $${facts.forecast.safeToSpendUntilPayday.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (payday ${new Date(`${facts.forecast.nextPayday}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}).`]
+      : []),
     ...(responder === "car_loan" && reported.length
       ? [`OTHER LOANS THE USER TOLD YOU ABOUT (not in the bank data): ${reported.map((l) => describeLoan(l, facts.localDate)).join("; ")}. All loans together: $${totalLoansOwed(facts, reported).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} owed. Mention them when they matter.`]
       : []),
@@ -315,6 +322,7 @@ export async function handleChat(
       ...(followUp ? [facts.accounts] : []),
       ...(responder === "checking" ? [lowestBreakdown(facts)] : []),
       ...(responder === "car_loan" ? [...loanSources(reported, facts.localDate), totalLoansOwed(facts, reported)] : []),
+      ...(thinkingAboutLoan ? [{ safeToSpendUntilPayday: facts.forecast.safeToSpendUntilPayday, nextPayday: facts.forecast.nextPayday }] : []),
     ],
   });
   // An "explain" whose Gemini answer couldn't be sent gets a plain explanation, not the character's usual line.
