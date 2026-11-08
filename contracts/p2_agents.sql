@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   sent_at         TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox (status, priority DESC, id);
+-- Additive (P3): thread a cast message under an earlier cast message, e.g. Card answering IRA in a debate.
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS reply_to_outbox BIGINT REFERENCES outbox(id);
 
 -- Proposals: written ONLY through ProposalService (P2). P1 and P4 call the endpoints, never the table.
 CREATE TABLE IF NOT EXISTS proposals (

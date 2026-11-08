@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { migrate, type Db } from "../src/db.js";
 import { saveInbound } from "../src/inbound.js";
-import { sendOne, MAX_ATTEMPTS, type Transport } from "../src/sender.js";
+import { sendOne, gapMs, MAX_ATTEMPTS, type Transport } from "../src/sender.js";
 import { formatMessage } from "../src/format.js";
 import type { InboundMessage } from "../src/message.js";
 
@@ -112,4 +112,30 @@ test("retries, then gives up after 3 attempts", async () => {
   assert.deepEqual(results, ["retry", "retry", "failed"]);
   const row = (await db.query(`SELECT status, attempts, last_error FROM outbox WHERE idempotency_key = 'k3'`)).rows[0];
   assert.deepEqual(row, { status: "failed", attempts: 3, last_error: "photon down" });
+});
+
+test("typing time follows message length but is never slow", () => {
+  assert.equal(gapMs("Agreed.", false), 700); // short acknowledgments pop in fast
+  assert.ok(gapMs("x".repeat(60), false) > gapMs("x".repeat(20), false));
+  assert.equal(gapMs("x".repeat(500), false), 2000); // capped
+  assert.equal(gapMs("x".repeat(500), true), 1000); // demo mode is faster
+});
+
+test("a cast message threads under the earlier cast message it answers", async () => {
+  const db = await freshDb();
+  const { t, sent } = fakeTransport();
+  const inboundId = await saveInbound(db, inbound("pho_msg_q", "I got a $600 bonus"));
+  await db.query(
+    `INSERT INTO outbox (idempotency_key, user_phone, speaker, text, priority, reply_to, created_sim_at) VALUES ('ira',$1,'ira','$200 here gets a free $200 match.',1,$2, now())`,
+    [PHONE, inboundId],
+  );
+  const iraId = (await db.query<{ id: number }>(`SELECT id FROM outbox WHERE idempotency_key='ira'`)).rows[0].id;
+  await db.query(
+    `INSERT INTO outbox (idempotency_key, user_phone, speaker, text, priority, reply_to, reply_to_outbox, created_sim_at) VALUES ('card',$1,'card','Fair, but my 24% costs you $48 a month.',1,$2,$3, now())`,
+    [PHONE, inboundId, iraId],
+  );
+  await sendOne(db, t, noWait);
+  await sendOne(db, t, noWait);
+  assert.equal(sent[0].parent, "pho_msg_q"); // IRA under the user's question
+  assert.equal(sent[1].parent, "pho_msg_1"); // Card under IRA's message (Photon id from the first send)
 });

@@ -11,6 +11,7 @@ export type OutboxRow = {
   text: string;
   attachment: string | null;
   reply_to: number | null;
+  reply_to_outbox: number | null;
   attempts: number;
 };
 
@@ -24,9 +25,13 @@ export type Transport = {
 export const MAX_ATTEMPTS = 3;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Typing gap before each message (real clock). Shorter in demo mode. */
-export function gapMs(demoMode: boolean, rand = Math.random): number {
-  return demoMode ? 300 + Math.floor(rand() * 500) : 1000 + Math.floor(rand() * 2000);
+/**
+ * How long the typing indicator shows before a message (real clock): longer messages "take longer
+ * to type", short acknowledgments pop in fast. Never slow: capped at 2 s (1 s in demo mode).
+ */
+export function gapMs(text: string, demoMode: boolean): number {
+  const n = text.length;
+  return demoMode ? Math.min(1000, Math.max(300, 250 + 8 * n)) : Math.min(2000, Math.max(700, 500 + 15 * n));
 }
 
 /** After a crash, rows left in 'sending' go back to the queue. Idempotency keys make the resend safe. */
@@ -39,7 +44,7 @@ async function claimNext(db: Db): Promise<OutboxRow | undefined> {
   const r = await db.query<OutboxRow>(
     `UPDATE outbox SET status = 'sending', attempts = attempts + 1
      WHERE id = (SELECT id FROM outbox WHERE status = 'pending' ORDER BY priority DESC, id LIMIT 1 FOR UPDATE SKIP LOCKED)
-     RETURNING id, idempotency_key, user_phone, speaker, text, attachment, reply_to, attempts`,
+     RETURNING id, idempotency_key, user_phone, speaker, text, attachment, reply_to, reply_to_outbox, attempts`,
   );
   return r.rows[0];
 }
@@ -74,8 +79,17 @@ export async function sendOne(
 
   const target: Target = { spaceId: space.space_id, senderId: space.agent_user_id };
   try {
+    // Thread under an earlier cast message (Card answering IRA), else under the user's message.
     let parent: string | undefined;
-    if (row.reply_to) {
+    if (row.reply_to_outbox) {
+      parent =
+        (
+          await db.query<{ provider_msg_id: string | null }>(`SELECT provider_msg_id FROM p3_outbox_sends WHERE outbox_id = $1`, [
+            row.reply_to_outbox,
+          ])
+        ).rows[0]?.provider_msg_id ?? undefined;
+    }
+    if (!parent && row.reply_to) {
       parent = (
         await db.query<{ provider_msg_id: string }>(`SELECT provider_msg_id FROM inbound_messages WHERE id = $1`, [row.reply_to])
       ).rows[0]?.provider_msg_id;
@@ -83,7 +97,7 @@ export async function sendOne(
 
     const { demoMode } = await simNow(db);
     await transport.setTyping(target, true);
-    await wait(gapMs(demoMode));
+    await wait(gapMs(row.text, demoMode));
 
     const key = `outbox:${row.idempotency_key}`;
     const res = (await transport.sendText(target, formatMessage(row.speaker, row.text), key, parent)) as { id?: string };

@@ -45,6 +45,11 @@ export const OutboxInsert = z.object({
   attachment: z.literal("indicator_card").nullable().optional(),
   /** inbound_messages.id to thread under, if Photon supports it. */
   reply_to: id.nullable().optional(),
+  /**
+   * outbox.id of an earlier cast message this one answers (e.g. Card replying to IRA in a debate).
+   * P3 threads it under that message in iMessage. Takes precedence over reply_to. Must be an earlier row.
+   */
+  reply_to_outbox: id.nullable().optional(),
   /** Groups one debate or digest, e.g. "evt:<eventId>". */
   thread_key: z.string().nullable().optional(),
   event_id: z.string().nullable().optional(),
