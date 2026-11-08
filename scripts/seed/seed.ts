@@ -102,24 +102,29 @@ async function main() {
   const dateFor = (daysAgo: number) => isoDay(new Date(today.getTime() - daysAgo * DAY_MS));
   const days = p.seedHints.historyDays;
 
-  if (RESET) {
-    console.log("Reset: deleting all Nessie data for this key (shared with P1)");
-    for (const t of ["Purchases", "Deposits", "Bills", "Transfers", "Accounts", "Customers"] as const) {
-      await api.deleteAll(t);
-    }
-  } else {
-    const existing = await findCustomer(api, p);
-    if (existing) {
-      console.log(`Customer already seeded (${existing}). Use --reset to rebuild.`);
+  // Nessie has no bulk delete, and customers, purchases and merchants can't be deleted at all
+  // (docs/nessie.md). Accounts can, so a reset deletes the demo customer's accounts (their
+  // purchases, deposits and bills go with them) and rebuilds them under the same customer.
+  const existing = await findCustomer(api, p);
+  if (existing) {
+    const accounts = await api.get<{ _id: string; type: string }[]>(`/customers/${existing}/accounts`).catch(() => []);
+    if (accounts.length && !RESET) {
+      console.log(`Customer already seeded (${existing}). Use --reset to rebuild its accounts.`);
       return;
+    }
+    for (const a of accounts) {
+      console.log(`Reset: deleting ${a.type} account ${a._id}`);
+      await api.req("DELETE", `/accounts/${a._id}`);
     }
   }
 
-  const customerId = await api.create("/customers", {
-    first_name: p.customer.firstName,
-    last_name: p.customer.lastName,
-    address: ADDRESS,
-  });
+  const customerId =
+    existing ??
+    (await api.create("/customers", {
+      first_name: p.customer.firstName,
+      last_name: p.customer.lastName,
+      address: ADDRESS,
+    }));
   // Balances are sent exactly as in persona.json. If Nessie only accepts integers, P1's spike
   // (docs/nessie.md) will say so and the own-ledger mirror covers the cents.
   const acct = (type: string, nickname: string, balance: number) =>
@@ -128,10 +133,13 @@ async function main() {
   const savings = await acct("Savings", "Savings", p.accounts.savings.balance);
   const card = await acct("Credit Card", "Card", p.accounts.card.balance);
 
+  // Merchants can't be deleted, so reuse ones with the same name instead of piling up copies.
+  const knownMerchants = DRY ? [] : await api.get<{ _id: string; name: string }[]>("/merchants").catch(() => []);
   const merchantIds: string[] = [];
   for (const m of p.seedHints.merchants) {
+    const found = knownMerchants.find((k) => k.name === m.name)?._id;
     merchantIds.push(
-      await api.create("/merchants", { name: m.name, category: m.category, address: ADDRESS, geocode: { lat: 32.98, lng: -96.75 } }),
+      found ?? (await api.create("/merchants", { name: m.name, category: m.category, address: ADDRESS, geocode: { lat: 32.98, lng: -96.75 } })),
     );
   }
 

@@ -43,9 +43,5 @@ export class Nessie {
   get<T>(path: string) {
     return this.req<T>("GET", path);
   }
-
-  // Deletes ALL data of one type for this API key. The key is shared with P1.
-  deleteAll(type: "Accounts" | "Bills" | "Customers" | "Deposits" | "Loans" | "Purchases" | "Transfers" | "Withdrawals") {
-    return this.req("DELETE", `/data?type=${type}`);
-  }
+  // There is no bulk delete: DELETE /data answers 403 "Missing Authentication Token" (no such route).
 }
