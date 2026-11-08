@@ -7,15 +7,17 @@ Owner: P4 (Rishi). Setup notes, findings, and the runbook for phone calls. Code 
 | Item | Status | Notes |
 |---|---|---|
 | SMS number purchased | done | +1 (828) 647-2114, on the Default voice profile. Shared iMessage lines can't take calls, so voice needs this number. |
-| Default SIP voice profile | in progress | Destination to set: `sip:+18286472114@sip.rtc.elevenlabs.io:5061;transport=tls` (TLS; or `sips:+18286472114@sip.rtc.elevenlabs.io:5061` if Photon wants the sips form) |
+| Default SIP voice profile | done | Inbound destination `sip:+18286472114@sip.rtc.elevenlabs.io:5061`, transport TLS, no SIP auth. Outbound credential = the profile's SIP username/password (digest SHA-256 works) |
 | ElevenLabs agent created | done | "Huddlr Coach", `agent_0701m6w7dzcvfj4rky8zejyee2we`, created by `npm run setup:elevenlabs`. LLM default gemini-2.0-flash |
 | Number imported into ElevenLabs (TLS) | done | `phnum_3701m6w7e19mf4b95b4jgpnpn0s3`, outbound to `sip.photon.codes` TLS (5061) with the Default profile's SIP username/password (`PHOTON_SIP_USERNAME`/`PHOTON_SIP_PASSWORD`); re-apply with `npm run setup:elevenlabs -- --update-number`. If outbound gets 401/407, switch the profile's digest from SHA-256 to MD5, assigned to the agent |
 | Inbound test call, audio both ways | done | 2026-11-07: "Hey Maya" greeting, can_i_afford and get_snapshot with real numbers. The server needs DEMO_USER_PHONE set, or the allowlist hides details |
-| Outbound credentials + test call | not started | |
+| Outbound credentials + test call | done | 2026-11-07: ElevenLabs outbound-call API → `sip.photon.codes` TLS → rang the demo phone, audio both ways |
 | Voice service code (context, post-call, emergency call) | done | merged in #6, #7 |
 | Tools checked against P1's stub | done | all six return 200 with the agent's request shapes |
 
-**Gate 0 (H3):** an inbound and an outbound call both work. No number by H3 means voice is cut.
+**Gate 0 (H3):** an inbound and an outbound call both work. **Passed 2026-11-07.**
+
+Open: the post-call recap reaches the server (webhook 2xx) but no iMessage arrived yet. Check `pm2 logs voice` for "no DATABASE_URL" and the `outbox` row status; the sender only texts phones that have texted the Huddlr line first.
 
 ## Fast path: setup script
 
