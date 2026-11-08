@@ -4,12 +4,14 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit && tsx --test test/*.test.ts",
+    "test": "tsc --noEmit && tsx --test test/*.test.ts && tsx src/gate1.ts",
     "card": "tsx --env-file-if-exists=../.env src/card-demo.ts",
     "harness": "tsx --env-file-if-exists=../.env src/harness.ts",
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
-    "local": "tsx src/server.ts --local"
+    "local": "tsx src/server.ts --local",
+    "gate1": "tsx src/gate1.ts",
+    "reset": "tsx src/reset.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
