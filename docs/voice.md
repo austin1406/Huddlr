@@ -13,6 +13,7 @@ Owner: P4 (Rishi). Setup notes, findings, and the runbook for phone calls. Code 
 | Inbound test call, audio both ways | done | 2026-11-07: "Hey Maya" greeting, can_i_afford and get_snapshot with real numbers. The server needs DEMO_USER_PHONE set, or the allowlist hides details |
 | Outbound credentials + test call | done | 2026-11-07: ElevenLabs outbound-call API → `sip.photon.codes` TLS → rang the demo phone, audio both ways |
 | Voice service code (context, post-call, emergency call) | done | merged in #6, #7 |
+| Emergency outbound call, end to end | done | 2026-11-07: a test `call_requests` row on the server rang the demo phone with the shortfall opener |
 | Tools checked against P1's stub | done | all six return 200 with the agent's request shapes |
 
 **Gate 0 (H3):** an inbound and an outbound call both work. **Passed 2026-11-07.**
