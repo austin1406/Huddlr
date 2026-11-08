@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { SimClock, localDate, type AccountId, type FactsSnapshot, type FinanceEvent, type Persona, type Scenario, type SimStateStore } from "../../../contracts/src";
+import { SimClock, localDate, type AccountId, type FactsSnapshot, type FinanceEvent, type Persona, type ProjectionRequest, type ProjectionResponse, type Scenario, type SimStateStore } from "../../../contracts/src";
 import type { AdminState, Backend, BillOp, EngineOps, PurchaseOp } from "../backend";
 import type { ScenarioName } from "../env";
 import { findMatchingProposal, type ProposalGateway } from "../proposals";
@@ -11,6 +11,7 @@ import { buildFacts } from "./facts";
 import type { SourceTxn, TxnSource } from "../nessie/source";
 import { createLedger, postBill, postDeposit, postPaycheck, postPurchase, postTransfer, postWithdrawal, settleThrough, type LedgerOverrides, type LedgerState, type Txn } from "./ledger";
 import { planV1, type PlanVersion } from "./optimizer";
+import { project } from "./projection";
 import { planV0 } from "./plan";
 import { whatIf } from "./whatif";
 
@@ -313,6 +314,13 @@ export class EngineBackend implements Backend, EngineOps {
     return this.exclusive(async () => {
       const { facts } = await this.sync();
       return this.planVersion === "v0" ? planV0(facts, amount) : planV1(facts, this.o.persona.goals, amount);
+    });
+  }
+
+  async project(request: ProjectionRequest): Promise<ProjectionResponse> {
+    return this.exclusive(async () => {
+      const { facts, today } = await this.sync();
+      return project(request, this.ledger, this.o.persona, facts, today);
     });
   }
 

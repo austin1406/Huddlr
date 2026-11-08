@@ -5,6 +5,7 @@ import {
   AcceptProposalRequest,
   CanIAffordRequest,
   ENDPOINTS,
+  ProjectionRequest,
   EventsQuery,
   FinanceEvent,
   GetPlanRequest,
@@ -119,6 +120,13 @@ export function createApp(opts: { secret: string } & ({ backend: Backend; state?
     const body = await parseBody(c, GetPlanRequest);
     if ("response" in body) return body.response;
     return c.json(await backend.plan(body.data.amount));
+  });
+
+  app.post(ENDPOINTS.project.path, async (c) => {
+    if (!backend.project) return c.json({ error: "engine_only", message: "Projection needs the engine (not FINANCE_MODE=stub)." }, 501);
+    const body = await parseBody(c, ProjectionRequest);
+    if ("response" in body) return body.response;
+    return c.json(await backend.project(body.data));
   });
 
   app.post(tools.get_pending_proposal.path, async (c) => c.json({ proposal: await backend.pending() }));
