@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app";
 import { handleChat } from "./chat";
 import { migrate, pool, readClock, type Queryable } from "./db";
-import { maybeSendDigest, pollEvents, type DebateDeps } from "./debate";
+import { maybeSendDigest, pollEvents, runWindfall, type DebateDeps } from "./debate";
 import { devRoutes } from "./dev";
 import { runFollowUps } from "./followups";
 import { financeClient } from "./finance";
@@ -99,8 +99,15 @@ every(env.pollMs, "inbound", async () => {
     }
     const result = await handleInbound(db, proposals, { ...row, id: Number(row.id) }, at);
     if (result.kind === "chat") {
-      const chat = await handleChat({ db, facts: () => finance.facts(), userPhone: row.user_phone, finance }, { id: Number(row.id), text: row.text }, at);
-      console.log(`[agents] text ${row.id}: chat -> ${chat.responder}${chat.learned ? ` (saved ${chat.learned} to memory)` : ""}`);
+      const chat = await handleChat(
+        {
+          db, facts: () => finance.facts(), userPhone: row.user_phone, finance,
+          windfall: (ask, t) => runWindfall({ db, finance, proposals, userPhone: row.user_phone }, ask, t),
+        },
+        { id: Number(row.id), text: row.text },
+        at,
+      );
+      console.log(`[agents] text ${row.id}: chat -> ${chat.debate ? `debate (${chat.debate.join(", ")})` : chat.responder}${chat.learned ? ` (saved ${chat.learned} to memory)` : ""}`);
     } else if (result.kind !== "duplicate") console.log(`[agents] text ${row.id}: ${result.kind}`);
   }
   await proposals.expireStale();

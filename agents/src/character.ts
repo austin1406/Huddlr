@@ -70,7 +70,8 @@ export function keyNumbers(id: CharacterId, facts: FactsSnapshot, event?: Financ
   const s = facts.shortfall;
   const out: string[] = [];
   const amount = event && typeof event.data.amount === "number" ? fmtUsd(event.data.amount) : null;
-  if (event && amount) out.push(`what just happened: ${event.type.replace(/_/g, " ")} of ${amount}${event.data.merchant ? ` at ${event.data.merchant}` : ""}`);
+  const what = typeof event?.data.label === "string" ? event.data.label : event?.type.replace(/_/g, " ");
+  if (event && amount) out.push(`what just happened: ${what} of ${amount}${event.data.merchant ? ` at ${event.data.merchant}` : ""}`);
   switch (id) {
     case "checking":
       out.push(`your balance: ${fmtUsd(a("checking")!.balance)}`);
