@@ -10,6 +10,16 @@ __DOMAIN__ {
 	handle /tools/* {
 		reverse_proxy localhost:4000
 	}
+	# finance: health (public), events + demo controls (need x-huddlr-secret)
+	handle /health {
+		reverse_proxy localhost:4000
+	}
+	handle /events* {
+		reverse_proxy localhost:4000
+	}
+	handle /admin/* {
+		reverse_proxy localhost:4000
+	}
 	handle /agents/* {
 		reverse_proxy localhost:5000
 	}
