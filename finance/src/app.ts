@@ -51,6 +51,7 @@ const AdminBodies = {
     .object({ from: z.enum(ACCOUNT_IDS), to: z.enum(ACCOUNT_IDS), amount: dollars })
     .refine((v) => v.from !== v.to, "from and to must differ"),
   paycheck: z.object({ amount: dollars.optional() }),
+  planVersion: z.object({ version: z.enum(["v0", "v1"]) }),
   bill: z.object({
     label: z.string().min(1),
     amount: dollars,
@@ -164,6 +165,12 @@ export function createApp(opts: { secret: string } & ({ backend: Backend; state?
     const body = await parseBody(c, AdminBodies.demoMode);
     if ("response" in body) return body.response;
     return c.json({ sim: await e.setDemoMode(body.data.on) });
+  }));
+
+  app.post("/admin/plan-version", engineOnly(async (c, e) => {
+    const body = await parseBody(c, AdminBodies.planVersion);
+    if ("response" in body) return body.response;
+    return c.json({ planVersion: e.setPlanVersion(body.data.version) });
   }));
 
   app.post("/admin/purchase", engineOnly(async (c, e) => {

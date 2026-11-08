@@ -10,6 +10,7 @@ import { EventLog, detectEvents } from "./events";
 import { buildFacts } from "./facts";
 import type { SourceTxn, TxnSource } from "../nessie/source";
 import { createLedger, postBill, postDeposit, postPaycheck, postPurchase, postTransfer, postWithdrawal, settleThrough, type LedgerOverrides, type LedgerState, type Txn } from "./ledger";
+import { planV1, type PlanVersion } from "./optimizer";
 import { planV0 } from "./plan";
 import { whatIf } from "./whatif";
 
@@ -26,6 +27,8 @@ export interface EngineOptions {
   /** JSON file that keeps the ledger and event log across restarts. Omit for in-memory (tests). */
   dataFile?: string;
   realNow?: () => number;
+  /** Which plan optimizer answers get_plan. Default v1. */
+  planVersion?: PlanVersion;
   /** The transaction log (Nessie). Without one the engine runs on the persona alone. */
   source?: TxnSource;
   /** Why a configured source is not in use, shown in /health. */
@@ -62,6 +65,7 @@ export class EngineBackend implements Backend, EngineOps {
   ) {
     this.ledger = ledger;
     this.log = log;
+    this.planVersion = o.planVersion ?? "v1";
     this.clock = new SimClock(o.store, o.realNow);
   }
 
@@ -147,6 +151,13 @@ export class EngineBackend implements Backend, EngineOps {
       console.warn(`[finance] transfer ${txnId} not matched yet, will retry: ${(err as Error).message}`);
       return undefined;
     }
+  }
+
+  private planVersion: PlanVersion;
+
+  setPlanVersion(version: PlanVersion): PlanVersion {
+    this.planVersion = version;
+    return version;
   }
 
   private lastPollAt = 0;
@@ -299,7 +310,10 @@ export class EngineBackend implements Backend, EngineOps {
   }
 
   async plan(amount: number) {
-    return this.exclusive(async () => planV0((await this.sync()).facts, amount));
+    return this.exclusive(async () => {
+      const { facts } = await this.sync();
+      return this.planVersion === "v0" ? planV0(facts, amount) : planV1(facts, this.o.persona.goals, amount);
+    });
   }
 
   pending() {
@@ -362,6 +376,7 @@ export class EngineBackend implements Backend, EngineOps {
         txnCount: this.ledger.txns.length,
         eventCount: this.log.all().length,
         recentTxns: this.ledger.txns.filter((t) => t.kind !== "daily").slice(-5),
+        planVersion: this.planVersion,
         source: {
           name: this.o.source?.name ?? "persona",
           baselined: this.ledger.sourceBaselined ?? false,
