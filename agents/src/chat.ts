@@ -8,7 +8,7 @@ import { accountSummary, isSummaryQuestion } from "./summary";
 import { describeLoan, handleLoanReport, loadReportedLoans, loanSources, totalLoansOwed } from "./loans";
 import { bottomLine } from "./bottomline";
 import { isBottomLineQuestion } from "./replies";
-import { doLine, explainTemplate, lowestBreakdown, speak } from "./character";
+import { config, doLine, explainTemplate, lowestBreakdown, speak } from "./character";
 import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
@@ -318,6 +318,8 @@ export async function handleChat(
   ].join("\n");
   const r = await speak(responder, facts, `${ask}${goals.length ? ` Their goals: ${JSON.stringify(goals.map((g) => g.value))}.` : ""}${context ? `\n${context}` : ""}`, {
     model: deps.model,
+    // A reply to the user's own text: Gemini gets time for several tries before anything pre-written is considered.
+    deadline: Date.now() + (config.debate.chat_reply_deadline_ms ?? 15000),
     // "What does that mean?" must rephrase the last message, not repeat it (code-enforced, one retry).
     ...((explain || followUp) && recent.lastText ? { avoidRepeating: [recent.lastText] } : {}),
     // Loan, asked how things stand, must count the loans the user told us about: the total across all of them.

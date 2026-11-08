@@ -513,12 +513,19 @@ export async function speak(
   let prompt = buildPrompt(id, facts, situation, opts.event, opts.plan, opts.ask, opts.heard);
   const sources = [factsFor(id, facts, opts.event), ...(opts.plan ? [opts.plan] : []), ...(opts.extraSources ?? [])];
 
-  for (const source of ["model", "retry"] as const) {
-    if (source === "retry" && deadline - Date.now() < config.debate.checker_retry_only_if_ms_remaining) break;
+  // Gemini gets several tries, each told what was wrong with the last one. The pre-written line is only for when
+  // Gemini is out of quota (or unreachable on every try): a checked Gemini answer is always preferred.
+  const maxAttempts: number = cm.max_attempts ?? 4;
+  for (let i = 0; i < maxAttempts; i++) {
+    const source = i === 0 ? ("model" as const) : ("retry" as const);
+    if (i > 0 && deadline - Date.now() < config.debate.checker_retry_only_if_ms_remaining) break;
     if (!opts.model && geminiQuota.limited()) {
       attempts.push({ error: `skipped: Gemini ${geminiQuota.status().scope ?? ""} limit` });
       break;
     }
+    // Last try: the strictest version, which almost always passes the checks.
+    if (i > 0 && i === maxAttempts - 1)
+      prompt += `\nLast try: use only numbers copied exactly from KEY NUMBERS (or no numbers at all), keep it to 2 short complete sentences, and follow every rule above.`;
     try {
       const text = await model(prompt);
       // Checked against this character's own slice, not all 45 forecast days, so stray numbers can't sneak through.
