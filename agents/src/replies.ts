@@ -12,8 +12,18 @@ export type HandleResult =
   | { kind: "chat" }
   | { kind: "accepted" | "declined" | "expired" | "clarify" | "noop"; proposalId: number };
 
-/** Short texts with a pending plan are treated as answers to it; longer ones are conversation. */
-const looksLikeAnswer = (text: string) => text.trim().split(/\s+/).length <= 6;
+/**
+ * Short texts with a pending plan are treated as answers to it ("maybe", "ok wait"); longer ones are conversation.
+ * An @-mention or a question is never an answer: "@savings how am I doing" must reach Savings even while a plan
+ * waits. Safe either way, because chat never approves anything; only a clear YES does.
+ */
+export const looksLikeAnswer = (text: string) => {
+  const t = text.trim().replace(/^[​-‍﻿\s]+/, "");
+  if (/^[@＠]/.test(t)) return false;
+  if (/\?\s*$/.test(t) && !/^(yes|yeah|yep|ok|okay|sure|no|nope|maybe|wait|hm+|huh)\b/i.test(t)) return false;
+  if (/^(how|what|what's|whats|why|where|when|which|who|can|could|should|would|is|am|are|do|does|did|will|tell me|show me|explain)\b/i.test(t)) return false;
+  return t.split(/\s+/).length <= 6;
+};
 
 export async function handleInbound(
   db: Queryable,

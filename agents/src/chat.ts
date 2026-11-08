@@ -24,7 +24,8 @@ const MENTION_ALIASES: Record<string, CharacterId> = {
  * Only a leading @name counts, so an email address or "@" mid-sentence never reroutes a text.
  */
 export function parseMention(text: string): { who: CharacterId; rest: string } | null {
-  const m = text.trim().match(/^@\s*([a-z_]+(?:\s+loan)?)\b[\s,:-]*(.*)$/is);
+  // Tolerates an invisible character before the @ and the full-width ＠ some keyboards produce.
+  const m = text.trim().replace(/^[​-‍﻿]+/, "").match(/^[@＠]\s*([a-z_]+(?:\s+loan)?)\b[\s,:-]*(.*)$/is);
   if (!m) return null;
   const who = MENTION_ALIASES[m[1].toLowerCase().replace(/\s+/g, "")];
   return who ? { who, rest: m[2].trim() } : null;
