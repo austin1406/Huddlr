@@ -4,6 +4,7 @@
 import type { InboundRow, ProposalService, ProposalSummary } from "../../contracts/src";
 import type { Queryable } from "./db";
 import { queueOutbox } from "./outbox";
+import { isRecallQuestion } from "./recall";
 import { classifyReply } from "./reply";
 
 export type HandleResult =
@@ -55,7 +56,7 @@ export async function handleInbound(
     }
     return { kind: "chat" };
   }
-  if (intent === "unclear" && !looksLikeAnswer(text)) return { kind: "chat" };
+  if (intent === "unclear" && (isRecallQuestion(text) || !looksLikeAnswer(text))) return { kind: "chat" };
 
   const id = Number(pending.id);
   const say = sayAbout(id);

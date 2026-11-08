@@ -10,100 +10,25 @@
 //
 //   npm run gate1                 fake model that invents a number every other reply (no quota)
 //   npm run gate1 -- --real       real Gemini, paced (uses quota)
-import { PGlite } from "@electric-sql/pglite";
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { Plan, TOOL_AUTH_HEADER, type CharacterId, type FinanceEvent } from "../../contracts/src";
-import { createApp as createFinanceApp } from "../../finance/src/app";
-import { StubState } from "../../finance/src/state";
-import { createApp } from "./app";
-import { factsFor } from "./character";
-import { handleChat } from "./chat";
-import { checkMessage, extractNumbers } from "./checker";
-import { migrate } from "./db";
-import { runEvent, type DebateDeps } from "./debate";
-import { financeClient } from "./finance";
+import { TOOL_AUTH_HEADER } from "../../contracts/src";
+import { runEvent } from "./debate";
 import { runFollowUps } from "./followups";
-import { makeProposalService } from "./proposals";
-import { handleInbound } from "./replies";
+import { lyingModel, SIM_PHONE as PHONE, simEvent as ev, ungroundedIn, world as makeWorld, type World } from "./simworld";
 
 loadEnv({ path: fileURLToPath(new URL("../../.env", import.meta.url)), quiet: true });
 const { values: args } = parseArgs({ options: { real: { type: "boolean", default: false }, runs: { type: "string", default: "30" }, "pace-ms": { type: "string", default: "4000" } } });
 const real = args.real && !!process.env.GEMINI_API_KEY;
 const pace = real ? Number(args["pace-ms"]) : 0;
-const PHONE = "+15555550100";
 const HOUR = 3600_000;
-
-/** Every other reply invents a number, so the checker is exercised on half the calls. */
-let fakeCalls = 0;
-const fake = async (prompt: string) => {
-  fakeCalls++;
-  const num = prompt.match(/"balance":(\d+(?:\.\d+)?)/)?.[1];
-  return fakeCalls % 2 ? `That is $9,999.99 you will never see again.` : num ? `I'm sitting at $${num} right now.` : "Let's take this one step at a time.";
-};
-const model = real ? undefined : fake;
+const model = real ? undefined : lyingModel();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function world(scenario: "normal" | "shortfall", at?: string, demoMode = false) {
-  const db = new PGlite();
-  await migrate(db);
-  const state = new StubState(scenario);
-  const fin = createFinanceApp({ secret: "", state });
-  const finance = financeClient("http://f", "", 4000, ((u: string, i?: RequestInit) => fin.request(u.replace("http://f", ""), i)) as typeof fetch);
-  const facts = await finance.facts();
-  let t = new Date(at ?? facts.asOf).getTime();
-  const now = () => new Date(t);
-  const proposals = makeProposalService(db, now);
-  const deps: DebateDeps = { db, finance, proposals, userPhone: PHONE, clock: async () => ({ now: now(), demoMode }), model };
-  const app = createApp({ db, proposals, secret: "k", demoUserPhone: PHONE, now });
-  let n = 0;
-  const text = async (body: string) => {
-    const r = await db.query<{ id: number }>(
-      "INSERT INTO inbound_messages (provider_msg_id, user_phone, text, received_sim_at) VALUES ($1, $2, $3, $4) RETURNING id",
-      [`gate-${++n}`, PHONE, body, now()],
-    );
-    const id = Number(r.rows[0].id);
-    const res = await handleInbound(db, proposals, { id, user_phone: PHONE, text: body }, now());
-    if (res.kind === "chat") await handleChat({ db, facts: () => finance.facts(), userPhone: PHONE, model }, { id, text: body }, now());
-    return res;
-  };
-  const outbox = async () =>
-    (await db.query<{ id: number; speaker: string; text: string; event_id: string | null; proposal_id: number | null; reply_to: number | null; priority: number }>(
-      "SELECT id, speaker, text, event_id, proposal_id, reply_to, priority FROM outbox ORDER BY id",
-    )).rows;
-  return { db, state, finance, facts, proposals, deps, app, text, outbox, now, jump: (ms: number) => { t += ms; } };
-}
-
-type World = Awaited<ReturnType<typeof world>>;
-
-/** Re-checks every queued message against exactly what its speaker was allowed to use. */
-async function ungroundedIn(w: World) {
-  const bad: string[] = [];
-  const reactions = await w.db.query<{ event_id: string; event: FinanceEvent | string }>("SELECT event_id, event FROM agent_event_reactions");
-  const events = new Map(reactions.rows.map((r) => [r.event_id, typeof r.event === "string" ? JSON.parse(r.event) : r.event]));
-  const inbound = await w.db.query<{ id: number; text: string }>("SELECT id, text FROM inbound_messages");
-  const said = new Map(inbound.rows.map((r) => [Number(r.id), r.text]));
-  const goals = (await w.db.query<{ value: unknown }>("SELECT value FROM memory_facts")).rows.map((r) => (typeof r.value === "string" ? JSON.parse(r.value) : r.value));
-  for (const m of await w.outbox()) {
-    const sources: unknown[] = [factsFor(m.speaker as CharacterId, w.facts, m.event_id ? events.get(m.event_id) ?? null : undefined), goals];
-    if (m.proposal_id != null) {
-      const p = await w.db.query<{ plan: unknown }>("SELECT plan FROM proposals WHERE id = $1", [m.proposal_id]);
-      if (p.rows[0]) sources.push(Plan.parse(typeof p.rows[0].plan === "string" ? JSON.parse(p.rows[0].plan as string) : p.rows[0].plan));
-    }
-    if (m.reply_to != null) sources.push(extractNumbers(said.get(Number(m.reply_to)) ?? "").map((f) => f.value ?? 0));
-    if (m.speaker === "coach" && !m.event_id) sources.push(w.facts); // Coach acks and digests are templated from the facts
-    const r = checkMessage(m.text, ...sources);
-    if (!r.ok) bad.push(`${m.speaker}: "${m.text}" -> ${r.ungrounded.map((u) => u.raw).join(", ")}`);
-  }
-  return bad;
-}
+const world = (scenario: "normal" | "shortfall", at?: string, demoMode = false) => makeWorld({ scenario, at, demoMode, model });
 
 const results: Array<{ name: string; pass: boolean; detail: string }> = [];
 const check = (name: string, pass: boolean, detail = "") => results.push({ name, pass, detail });
-const ev = (id: string, type: FinanceEvent["type"], over: Partial<FinanceEvent> = {}): FinanceEvent => ({
-  id, type, occurredAt: "2026-11-07T16:00:00.000Z", severity: "medium", accountId: "checking", data: {}, ...over,
-});
 
 // ---------------------------------------------------------------- 1. 30 scripted runs
 const scripts: Array<(w: World, i: number) => Promise<unknown>> = [
@@ -124,7 +49,7 @@ for (let i = 0; i < runs; i++) {
   const w = await world(scenario, undefined, true);
   const r = await scripts[i % scripts.length](w, i);
   if (scenario === "shortfall") {
-    const e = (await runEvent(w.deps, ev(`g_fp_${i}`, "forecast_problem", { severity: "high" }))) as { firstMessageMs: number | null };
+    const e = await runEvent(w.deps, ev(`g_fp_${i}`, "forecast_problem", { severity: "high" }));
     if (e.firstMessageMs != null) firstMs.push(e.firstMessageMs);
     await w.text(i % 2 ? "yes" : "maybe?");
   }

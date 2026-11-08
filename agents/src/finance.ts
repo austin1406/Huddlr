@@ -1,10 +1,11 @@
 // Client for P1's finance service (/facts, /events, /tools/*). Every number the agents use comes from here.
-import { ENDPOINTS, EventsResponse, FactsSnapshot, Plan, TOOL_AUTH_HEADER, type FinanceEvent } from "../../contracts/src";
+import { CanIAffordResponse, ENDPOINTS, EventsResponse, FactsSnapshot, Plan, TOOL_AUTH_HEADER, type FinanceEvent } from "../../contracts/src";
 
 export interface Finance {
   facts(): Promise<FactsSnapshot>;
   events(after?: string): Promise<FinanceEvent[]>;
   plan(amount: number): Promise<Plan>;
+  canIAfford(amount: number, label?: string): Promise<CanIAffordResponse>;
 }
 
 /** Real-clock timeouts: these are delivery mechanics, not calendar logic. fetchImpl lets tests talk to P1's app in-process. */
@@ -25,5 +26,6 @@ export function financeClient(baseUrl: string, secret: string, timeoutMs = 4000,
     events: async (after) =>
       EventsResponse.parse(await call("GET", `${ENDPOINTS.events.path}?limit=50${after ? `&after=${encodeURIComponent(after)}` : ""}`)).events,
     plan: async (amount) => Plan.parse(await call("POST", ENDPOINTS.tools.get_plan.path, { amount })),
+    canIAfford: async (amount, label) => CanIAffordResponse.parse(await call("POST", ENDPOINTS.tools.can_i_afford.path, { amount, ...(label ? { label } : {}) })),
   };
 }
