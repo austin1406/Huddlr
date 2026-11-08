@@ -313,7 +313,10 @@ export function planTemplate(plan: Plan, ask?: string | null): string {
   const later = rest.filter((l) => !keep.includes(l));
   const extra =
     keep.map((l) => ` Keep ${usd(l.amount)} in Checking so you're not short before payday.`).join("") +
-    (later.length ? ` The plan also suggests ${later.map((l) => `${usd(l.amount)} to ${destName(l.destination)}`).join(" and ")} for later.` : "");
+    // Anything the move line doesn't already name is listed, so no part of the plan goes unmentioned.
+    (later.filter((l) => !ask?.includes(usd(l.amount))).length
+      ? ` The plan also suggests ${later.filter((l) => !ask?.includes(usd(l.amount))).map((l) => `${usd(l.amount)} to ${destName(l.destination)}`).join(" and ")} for later.`
+      : "");
   return ask ? `${head}${extra} ${doLine(ask)}` : `${head}${extra} Tell me if you'd like a different split.`;
 }
 
