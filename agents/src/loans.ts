@@ -40,6 +40,8 @@ export function parseTerms(text: string): { aprPercent?: number; monthlyPayment?
 export function parseLoanReport(text: string): (Partial<ReportedLoan> & { label: string }) | null {
   const t = text.trim();
   if (isQuestion(t) || !/\bloans?\b/i.test(t)) return null;
+  // Thinking about a loan isn't having one: "i wanna ... take a loan out", "can i ... take a loan out for a house".
+  if (/\b(wanna|want to|wants to|would like to|thinking (?:of|about)|planning (?:to|on)|plan to|gonna|going to|hoping to|might|maybe|should i|can i|could i|if i|considering)\b/i.test(t)) return null;
   if (!/\b(took|take|taking|have|has|had|got|get|new|add|added|adding|owe|borrowed|signed|started|opened)\b/i.test(t)) return null;
   const kind =
     t.match(/\b(student|tuition|school|college|personal|medical|home|house|business|wedding|payday|bank|car|auto)\s+loan/i)?.[1] ??
@@ -186,7 +188,9 @@ export async function handleLoanReport(db: Queryable, phone: string, text: strin
 
   const all = [...loans.filter((l) => l.key !== loan.key), loan];
   const parts: string[] = [];
-  parts.push(loan.owed == null ? `Got it, ${isNew ? "a" : "your"} ${loan.label}.` : `${isNew ? "Added" : "Updated"} ${describeLoan(loan, facts.localDate)}.`);
+  const article = !isNew ? "your" : loan.label === "other loan" ? "" : /^[aeiou]/i.test(loan.label) ? "an" : "a";
+  const named = loan.label === "other loan" && isNew ? "another loan" : `${article} ${loan.label}`;
+  parts.push(loan.owed == null ? `Got it, ${named}.` : `${isNew ? "Added" : "Updated"} ${describeLoan(loan, facts.localDate)}.`);
   if (missingAny) {
     const termsText = terms.length ? `the ${terms.join(" and ")}` : "";
     const ask = loan.owed == null
