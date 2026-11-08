@@ -100,13 +100,18 @@ export async function loadChat(db: Db, phone: string, limit = 40): Promise<ChatL
 }
 
 /** Loans the user told the chat about (P2 saves them in memory_facts as loan:<name>). Empty if none or unreadable. */
-export async function loadReportedLoans(db: Db, phone: string): Promise<{ label: string; owed?: number; aprPercent?: number; monthlyPayment?: number }[]> {
+export async function loadReportedLoans(
+  db: Db,
+  phone: string,
+): Promise<{ key: string; label: string; owed?: number; aprPercent?: number; monthlyPayment?: number; addedVia?: string; type?: string }[]> {
   try {
-    const r = await db.query<{ value: any }>(
-      `SELECT value FROM memory_facts WHERE user_phone = $1 AND key LIKE 'loan:%' ORDER BY updated_sim_at`,
+    const r = await db.query<{ key: string; value: any }>(
+      `SELECT key, value FROM memory_facts WHERE user_phone = $1 AND key LIKE 'loan:%' ORDER BY created_sim_at, id`,
       [phone],
     );
-    return r.rows.map((x) => (typeof x.value === "string" ? JSON.parse(x.value) : x.value)).filter((v) => v && typeof v.label === "string");
+    return r.rows
+      .map((x) => ({ key: x.key, ...(typeof x.value === "string" ? JSON.parse(x.value) : x.value) }))
+      .filter((v) => v && typeof v.label === "string");
   } catch {
     return [];
   }

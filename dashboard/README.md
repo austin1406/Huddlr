@@ -60,11 +60,25 @@ built from P1's numbers (no AI, so every number is exact). Under the table: your
 
 - **One seat per account**, evenly spaced, whatever the number: what you have on the left, what you owe on the right.
 - **Every loan sits with one 🧾 Loan person**: the bank's car loan, any other `*_loan` account, and loans the user
-  told the chat about (P2 keeps them in `memory_facts` as `loan:<name>`). The seat shows the total; tapping it lists
-  each loan. Loans told by text are marked as not in the bank data (so not in the forecast).
-- **Any other account P1 adds gets its own seat automatically**, e.g. `kind: "cd"` (🔒 CD: rate, locked-until date)
-  or `kind: "mortgage"` (🏠 Mortgage). Names and emoji come from `cast.json` if a character exists for it.
-- The team dashboard's account cards follow the same rule (one Loan card with the breakdown).
+  added (here or by text). The seat shows the total; tapping it lists each loan.
+- **"+ Add an account"** lets the user add money the bank data doesn't show. They pick a type from a fixed list, and
+  each type always goes to the existing agent whose job matches what the money is for (no new agents):
+
+  | What the money is for | Spoken for in the chat by | Types |
+  |---|---|---|
+  | Spend now | 🏦 Checking | another checking account, cash app |
+  | Set aside, safe | 🐷 Savings | savings, CD, money market, HSA, other money I have |
+  | Long-term | 🌱 IRA | 401(k), Roth IRA, brokerage, crypto |
+  | Borrowing you can keep using | 💳 Card | another credit card, store card, buy now pay later |
+  | Set payments | 🧾 Loan | mortgage, other money I owe; student/auto/personal loans **join the Loan total** |
+
+  Added accounts get their own seat marked "added by you" (credit cards too), can be edited or removed (two taps),
+  and aren't health-scored or in the forecast. Stored in `memory_facts` so the agents can read them:
+  `account:<type>_<id>` → `{type, name, balance, aprPercent?, monthlyPayment?, until?, owner, group, addedVia}` and
+  loans as `loan:<name>` → `{label, owed, aprPercent?, monthlyPayment?, type, addedVia}` (the shape P2's Loan agent
+  already reads). Up to 12 per person.
+- Any other account P1 adds to `/facts` (e.g. `kind: "cd"` or `"mortgage"`) also gets a seat automatically.
+- The team dashboard's account cards follow the same rules.
 
 ### Signing in
 

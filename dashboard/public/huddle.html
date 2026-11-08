@@ -72,6 +72,21 @@ main{max-width:1160px;margin:0 auto;padding:28px 24px 64px}
 .plate .d{font-size:clamp(11px,2.9vw,12.5px);font-weight:700;white-space:nowrap}
 .plate .d.down{color:var(--concern)}.plate .d.up{color:var(--good)}
 .seat.quiet{opacity:.38}
+.seat.added{--ring:var(--hair)}
+.addbtn{display:block;margin:12px auto 0;border:1px dashed var(--muted);background:none;border-radius:999px;padding:8px 16px;font-weight:700;font-size:14px;color:var(--ink);cursor:pointer}
+.addbtn:hover{border-color:var(--accent);color:var(--accent)}
+.form label{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}
+.form input,.form select{width:100%;padding:11px 12px;border:1px solid var(--hair);border-radius:12px;background:var(--page);font-size:16px}
+.form select{appearance:auto}
+.form .who{font-size:13.5px;color:var(--muted);margin-top:6px}
+.form .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form .actions{display:flex;gap:10px;margin-top:20px}
+.form .actions .unlock{flex:1}
+.ghost{border:1px solid var(--hair);background:none;border-radius:12px;padding:12px 16px;font-weight:600;cursor:pointer}
+.danger{border:0;background:none;color:var(--concern);font-weight:700;cursor:pointer;padding:12px 0;margin-top:6px}
+.sheet .tools{display:flex;gap:10px;margin-top:14px}
+.sheet .tools button{flex:1}
+.mini-x{border:0;background:none;color:var(--concern);font-weight:700;cursor:pointer;font-size:13px;padding:0;margin-left:8px}
 .stage[style*="--seats:7"] .av,.stage[style*="--seats:8"] .av,.stage[style*="--seats:9"] .av{width:clamp(50px,12vw,72px)}
 @media (max-width:560px){.stage[style*="--seats:7"],.stage[style*="--seats:8"],.stage[style*="--seats:9"]{aspect-ratio:1/1.16}}
 .stage[style*="--seats:7"] .seat,.stage[style*="--seats:8"] .seat,.stage[style*="--seats:9"] .seat{width:clamp(84px,22%,130px)}
@@ -215,8 +230,10 @@ const money = (n) => { const a = Math.abs(n); return (n < 0 ? "-" : "") + "$" + 
 const M = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const day = (iso) => { const [, m, d] = iso.split("-").map(Number); return `${M[m - 1]} ${d}`; };
 const statusWord = { good: "On track", watch: "Keep an eye on", concern: "Needs attention" };
-const TINT = { checking: "#d8efec", savings: "#f8dde2", ira: "#e1f0d9", card: "#e7e0f6", car_loan: "#fbe5d3", cd: "#dfe7f7", mortgage: "#f2e6d3" };
-const tint = (id) => TINT[id] || "#e6e9ef";
+const TINT = { checking: "#d8efec", savings: "#f8dde2", ira: "#e1f0d9", card: "#e7e0f6", car_loan: "#fbe5d3", cd: "#dfe7f7", mortgage: "#f2e6d3", "type:cd": "#dfe7f7", "type:mortgage": "#f2e6d3" };
+// Added accounts take a soft version of the color of the agent who speaks for them.
+const OWNER_TINT = { checking: "#e3f3f1", savings: "#fbe7ea", ira: "#e8f4e2", card: "#eee8f8", car_loan: "#fcebdd" };
+const tint = (id) => TINT[id] || (String(id).startsWith("type:") ? OWNER_TINT[(data?.accountTypes || []).find((t) => "type:" + t.id === id)?.owner] : null) || "#e6e9ef";
 
 /* ---------- the people (original simple illustrations) ---------- */
 const LOOK = {
@@ -226,7 +243,9 @@ const LOOK = {
   card:     { skin: "#8d5a3c", hair: "#2b1d16", shirt: "#7b5cc4", style: "swoop",  extra: "earring" },
   car_loan: { skin: "#d9a074", hair: "#5b3b26", shirt: "#e8833a", style: "short",  extra: "cap" },
   coach:    { skin: "#b97a55", hair: "#1c1c1c", shirt: "#26407a", style: "short",  extra: "whistle" },
-  cd:       { skin: "#e3b38f", hair: "#7a4a2a", shirt: "#3f6fb5", style: "bun",    extra: "glasses" },
+  "type:cd": { skin: "#e3b38f", hair: "#7a4a2a", shirt: "#3f6fb5", style: "bun",    extra: "glasses" },
+  "type:mortgage": { skin: "#a8714f", hair: "#2a2320", shirt: "#8a6d3b", style: "gray",   extra: "badge" },
+  cd: { skin: "#e3b38f", hair: "#7a4a2a", shirt: "#3f6fb5", style: "bun",    extra: "glasses" },
   mortgage: { skin: "#a8714f", hair: "#2a2320", shirt: "#8a6d3b", style: "gray",   extra: "badge" },
 };
 // Anyone new at the table gets one of these, picked from their id so it stays the same every visit.
@@ -287,14 +306,14 @@ function seat(p, i, n) {
   const tall = innerWidth <= 560; // phone: a slightly taller oval so name plates clear the table
   const left = 50 + 37 * Math.cos(rad), top = 51 + (tall ? 39 : 37) * Math.sin(rad);
   const cls = [p.status, result ? (r?.changed ? "moved" : "quiet") : ""].join(" ");
-  let d = `<div class="d" style="color:var(--muted);font-weight:600">${p.group === "owe" ? "owed" : "held"}</div>`;
+  let d = `<div class="d" style="color:var(--muted);font-weight:600">${p.added ? "added by you" : p.group === "owe" ? "owed" : "held"}</div>`;
   if (r?.changed && r.after) {
     const n0 = Number(String(r.before).replace(/[^\d.-]/g, "")), n1 = Number(String(r.after).replace(/[^\d.-]/g, ""));
     const better = p.group === "owe" ? n1 < n0 : n1 > n0;
     d = `<div class="d ${better ? "up" : "down"} num">${esc(r.after.replace(/^lowest /, "low "))}</div>`;
   }
-  return `<button class="seat ${cls}" data-id="${p.id}" style="left:${left.toFixed(1)}%;top:${top.toFixed(1)}%;--tint:${tint(p.id)}" aria-label="${esc(p.name)}: ${money(p.balance)}, ${statusWord[p.status]}. Open details.">
-    <div class="av">${figure(p.id, mood)}</div>
+  return `<button class="seat ${cls}${p.added ? " added" : ""}" data-id="${esc(p.id)}" style="left:${left.toFixed(1)}%;top:${top.toFixed(1)}%;--tint:${tint(p.look || p.id)}" aria-label="${esc(p.name)}: ${money(p.balance)}${p.added ? ", added by you" : ", " + statusWord[p.status]}. Open details.">
+    <div class="av">${figure(p.look || p.id, mood)}</div>
     <div class="plate"><div class="n">${p.emoji} ${esc(p.name)}</div><div class="b num">${money(p.balance)}</div>${d}</div>
   </button>`;
 }
@@ -547,6 +566,7 @@ function render() {
           ${people.map((p, i) => seat(p, i, people.length)).join("")}
         </div>
         <p class="hint">Tap anyone for details</p>
+        <button class="addbtn" id="add">+ Add an account</button>
       </div>
       <div>${rightColumn(h)}</div>
     </div>
@@ -560,17 +580,81 @@ function render() {
 function openSheet(id) {
   const p = data.huddle.people.find((x) => x.id === id);
   if (!p) return;
-  const sms = data.agentHandle ? `sms:${encodeURIComponent(data.agentHandle)}&body=${encodeURIComponent("@" + p.name + " ")}` : null;
+  const type = p.added ? (data.accountTypes || []).find((t) => t.id === p.added.type) : null;
+  const talker = type ? type.ownerName.replace(/^\S+\s/, "") : p.name; // who answers for it in the chat
+  const sms = data.agentHandle ? `sms:${encodeURIComponent(data.agentHandle)}&body=${encodeURIComponent("@" + talker + " " + (p.added ? `about my ${p.name}: ` : ""))}` : null;
   $("#sheet").innerHTML = `<button class="x" aria-label="Close" id="close">×</button>
-    <div class="hd"><div class="av" style="--tint:${tint(p.id)}">${figure(p.id, p.mood)}</div>
-      <div><div class="nm">${p.emoji} ${esc(p.name)}</div><div class="bal num">${money(p.balance)}</div><span class="pill ${p.status}">${statusWord[p.status]}</span></div></div>
+    <div class="hd"><div class="av" style="--tint:${tint(p.look || p.id)}">${figure(p.look || p.id, p.mood)}</div>
+      <div><div class="nm">${p.emoji} ${esc(p.name)}</div><div class="bal num">${money(p.balance)}</div>${p.added ? `<span class="pill watch">Added by you</span>` : `<span class="pill ${p.status}">${statusWord[p.status]}</span>`}</div></div>
     <div class="quote">${esc(p.says)}</div>
     <ul class="rows">${p.detail.map((r) => `<li><span>${esc(r.label)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span><span class="v num">${esc(r.value)}</span></li>`).join("")}</ul>
+    ${p.ownLoans?.length ? `<h3>Loans you added</h3><ul class="rows">${p.ownLoans.map((l) => `<li><span>${esc(l.label)}<small>${l.via === "huddle" ? "added here" : "told by text"}</small></span><button class="mini-x" data-remove="${esc(l.key)}" data-name="${esc(l.label)}">Remove</button></li>`).join("")}</ul>` : ""}
     ${p.upcoming.length ? `<h3>Coming up</h3><ul class="rows">${p.upcoming.map((u) => `<li><span>${esc(u.label)}<small>${day(u.date)}</small></span><span class="v num ${u.sign === "+" ? "plus" : ""}">${u.sign === "+" ? "+" : "−"}${money(u.amount)}</span></li>`).join("")}</ul>` : ""}
-    ${sms ? `<a class="text" href="${sms}">Text ${esc(p.name)}</a>` : ""}`;
+    ${p.added ? `<div class="tools"><button class="ghost" id="edit" data-id="${esc(p.id)}">Edit</button><button class="ghost" data-remove="${esc(p.added.key)}" data-name="${esc(p.name)}" style="color:var(--concern)">Remove</button></div>` : ""}
+    ${sms ? `<a class="text" href="${sms}">Text ${esc(talker)}${p.added ? ` about it` : ""}</a>` : ""}`;
   $("#scrim").classList.add("on");
   $("#close").focus();
 }
+
+/* ---------- add / edit an account ---------- */
+let acctNotice = "";
+// draft: what's typed so far; key: the account being edited ("" for a new one).
+function accountForm(draft, key = "") {
+  const types = data.accountTypes || [];
+  const t = types.find((x) => x.id === draft.type) || types.find((x) => x.id === "cd") || types[0];
+  const lockLoan = key ? key.startsWith("loan:") : null; // an edit can't turn a loan into its own seat, or back
+  const allowed = types.filter((x) => lockLoan === null || !!x.joinsLoan === lockLoan);
+  const opts = (group) => allowed.filter((x) => x.group === group).map((x) => `<option value="${x.id}" ${x.id === t.id ? "selected" : ""}>${x.emoji} ${esc(x.label)}</option>`).join("");
+  const has = (f) => t.fields.includes(f);
+  const v = (k) => esc(draft[k] ?? "");
+  $("#sheet").innerHTML = `<button class="x" aria-label="Close" id="close">×</button>
+    <form class="form" id="acctform" data-key="${esc(key)}">
+      <h2 style="margin:0 0 4px;font-size:22px">${key ? "Edit account" : "Add an account"}</h2>
+      <p style="margin:0;color:var(--muted);font-size:14.5px">For money your bank data doesn't show. ${t.joinsLoan ? "Loans join the Loan total at the table." : "It gets its own seat at the table."}</p>
+      <label for="f-type">What kind of account?</label>
+      <select id="f-type" name="type">${opts("have") ? `<optgroup label="Money you have">${opts("have")}</optgroup>` : ""}${opts("owe") ? `<optgroup label="Money you owe">${opts("owe")}</optgroup>` : ""}</select>
+      <div class="who">${esc(t.ownerName)} will talk about it in the chat.</div>
+      <label for="f-name">Name</label>
+      <input id="f-name" name="name" maxlength="40" placeholder="${esc(t.label)}" value="${v("name")}">
+      <label for="f-bal">${t.group === "owe" ? "How much do you owe?" : "How much is in it?"}</label>
+      <input id="f-bal" name="balance" inputmode="decimal" placeholder="$0" value="${v("balance")}">
+      ${has("rate") || has("monthly") ? `<div class="row2">
+        ${has("rate") ? `<div><label for="f-rate">Interest rate (%)</label><input id="f-rate" name="aprPercent" inputmode="decimal" placeholder="optional" value="${v("aprPercent")}"></div>` : "<div></div>"}
+        ${has("monthly") ? `<div><label for="f-mo">Monthly payment</label><input id="f-mo" name="monthlyPayment" inputmode="decimal" placeholder="optional" value="${v("monthlyPayment")}"></div>` : "<div></div>"}
+      </div>` : ""}
+      ${has("until") ? `<label for="f-until">Unlocks on</label><input id="f-until" name="until" type="date" value="${v("until")}">` : ""}
+      ${acctNotice ? `<p class="err-line">${esc(acctNotice)}</p>` : ""}
+      <div class="actions"><button type="button" class="ghost" id="close2">Cancel</button><button class="unlock">${key ? "Save" : "Add to the table"}</button></div>
+    </form>`;
+  $("#scrim").classList.add("on");
+  $("#f-type").addEventListener("change", () => accountForm(Object.fromEntries(new FormData($("#acctform"))), key));
+}
+async function saveAccount(form) {
+  const body = Object.fromEntries(new FormData(form));
+  const key = form.dataset.key;
+  const r = await fetch(API + "/accounts" + (key ? "/" + encodeURIComponent(key) : ""), {
+    method: key ? "PUT" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }).catch(() => null);
+  const j = r ? await r.json().catch(() => ({})) : {};
+  if (r && r.status === 401) return needLogin(j.hint || "");
+  if (!r || !r.ok) { acctNotice = j.error || "Couldn't save. Try again."; accountForm(body, key); acctNotice = ""; return; }
+  closeSheet(); result = null; await load(true);
+}
+async function removeAccount(key, name) {
+  if (!confirmRemove(name)) return;
+  const r = await fetch(API + "/accounts/" + encodeURIComponent(key), { method: "DELETE" }).catch(() => null);
+  if (r && r.status === 401) return needLogin("");
+  closeSheet(); result = null; await load(true);
+}
+// Two taps to remove: the button asks "Tap again to remove" first (no browser pop-ups).
+let armed = null;
+function confirmRemove(name) {
+  const b = document.activeElement;
+  if (armed === b) { armed = null; return true; }
+  armed = b; if (b) b.textContent = `Tap again to remove ${name}`;
+  return false;
+}
+
 const closeSheet = () => $("#scrim").classList.remove("on");
 
 async function ask(text) {
@@ -664,9 +748,17 @@ function needLogin(hint, autoSend = true) {
   if (autoSend) sendCode(); // send right away; this only runs in a real browser, never in link previews
 }
 const expiredView = () => { login = null; $("#app").innerHTML = `<div class="loading"><h2>This link has expired</h2>Text “huddle link” to get a new one.</div>`; };
-document.addEventListener("submit", (e) => { if (e.target.id === "unlock") { e.preventDefault(); verify(); } });
+document.addEventListener("submit", (e) => {
+  if (e.target.id === "unlock") { e.preventDefault(); verify(); }
+  if (e.target.id === "acctform") { e.preventDefault(); saveAccount(e.target); }
+});
 document.addEventListener("input", (e) => { if (e.target.id === "code") { const v = e.target.value.replace(/\D/g, "").slice(0, 6); e.target.value = v; if (v.length === 6) verify(); } });
 document.addEventListener("click", async (e) => {
+  if (e.target.id === "add") { acctNotice = ""; accountForm({ type: "cd" }); return; }
+  if (e.target.id === "edit") { const p = data.huddle.people.find((x) => x.id === e.target.dataset.id); if (p) accountForm({ ...p.added }, p.added.key); return; }
+  if (e.target.id === "close2") return closeSheet();
+  const rm = e.target.closest("[data-remove]");
+  if (rm) { rm.focus(); return removeAccount(rm.dataset.remove, rm.dataset.name); }
   if (e.target.id === "resend") sendCode();
   if (e.target.id === "lock") { await fetch(AUTH + "/lock", { method: "POST" }).catch(() => {}); data = null; login = null; needLogin("", false); }
 });
