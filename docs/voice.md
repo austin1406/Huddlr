@@ -10,7 +10,7 @@ Owner: P4 (Rishi). Setup notes, findings, and the runbook for phone calls. Code 
 | Default SIP voice profile | in progress | Destination to set: `sip:+18286472114@sip.rtc.elevenlabs.io:5061;transport=tls` (TLS; or `sips:+18286472114@sip.rtc.elevenlabs.io:5061` if Photon wants the sips form) |
 | ElevenLabs agent created | done | "Huddlr Coach", `agent_0701m6w7dzcvfj4rky8zejyee2we`, created by `npm run setup:elevenlabs`. LLM default gemini-2.0-flash |
 | Number imported into ElevenLabs (TLS) | done | `phnum_3701m6w7e19mf4b95b4jgpnpn0s3`, outbound to `sip.photon.codes` TLS (5061) with the Default profile's SIP username/password (`PHOTON_SIP_USERNAME`/`PHOTON_SIP_PASSWORD`); re-apply with `npm run setup:elevenlabs -- --update-number`. If outbound gets 401/407, switch the profile's digest from SHA-256 to MD5, assigned to the agent |
-| Inbound test call, audio both ways | not started | |
+| Inbound test call, audio both ways | done | 2026-11-07: "Hey Maya" greeting, can_i_afford and get_snapshot with real numbers. The server needs DEMO_USER_PHONE set, or the allowlist hides details |
 | Outbound credentials + test call | not started | |
 | Voice service code (context, post-call, emergency call) | done | merged in #6, #7 |
 | Tools checked against P1's stub | done | all six return 200 with the agent's request shapes |
@@ -86,7 +86,7 @@ Re-run against the deployed domain with `npm run latency -- 20` (adds network ti
 
 | Call | Question | Latency | Recap delay | Notes |
 |---|---|---|---|---|
-| 1 | | | | |
+| 1 | "Can I afford a $40 dinner?", balances, "what is the $437?" | LLM first token ~0.65s per turn; ~4s from question to answer on tool turns | not checked | All numbers matched the tools (437.50 safe to spend, 5 balances, payday Nov 20) |
 | 2 | | | | |
 | 3 | | | | |
 
