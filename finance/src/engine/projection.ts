@@ -4,6 +4,7 @@ import { addDays, billDueOn, daysBetween, isPayday, lastDayOfMonth, r2 } from ".
 import type { LedgerState } from "./ledger";
 import { monthlyEssentials } from "./facts";
 import { planV1 } from "./optimizer";
+import { fitSpendModel, hashSeed, makeDaySampler, mulberry32, type Recurring, type SpendModel } from "./spending";
 
 export interface ProjectionOptions {
   days: number;
@@ -55,56 +56,94 @@ const point = (date: string, b: Balances): ProjectionPoint => {
   };
 };
 
+interface PathResult {
+  points: ProjectionPoint[];
+  /** Net worth at each sampled day (filled in light mode, where no point objects are built). */
+  nw: number[];
+  lowest: { date: string; balance: number };
+  firstNegativeDate: string | null;
+  cardPaidOffDate: string | null;
+  carLoanPaidOffDate: string | null;
+  interest: number;
+  end: Balances;
+}
+
+interface CalDay {
+  date: string;
+  weekday: number;
+  payday: boolean;
+  bills: { id: string; amount: number }[];
+  oneOff: number;
+  recurring: number;
+  monthEnd: boolean;
+}
+
+/** Everything about each day that does not depend on the random spending, worked out once per request. */
+function buildCalendar(state: LedgerState, persona: Persona, today: string, days: number, recurring: Recurring[]): CalDay[] {
+  const out: CalDay[] = [];
+  for (let i = 0; i < days; i++) {
+    const date = addDays(today, i);
+    out.push({
+      date,
+      weekday: new Date(date + "T00:00:00Z").getUTCDay(),
+      payday: isPayday(state.lastPaid, persona.income.everyDays, date),
+      bills: persona.recurringBills.filter((b) => billDueOn(b.dayOfMonth, date)).map((b) => ({ id: b.id, amount: b.amount })),
+      oneOff: state.oneOffBills.filter((b) => !b.paid && b.dueDate === date).reduce((s, b) => s + b.amount, 0),
+      recurring: recurring.filter((r) => recurringDue(r, date)).reduce((s, r) => s + r.amount, 0),
+      monthEnd: date.slice(8, 10) === String(lastDayOfMonth(date)).padStart(2, "0"),
+    });
+  }
+  return out;
+}
+
+const recurringDue = (r: Recurring, date: string): boolean => {
+  if (date < r.nextDate) return false;
+  if (r.everyDays === 30) return billDueOn(Number(r.nextDate.slice(8, 10)), date);
+  return daysBetween(r.nextDate, date) % r.everyDays === 0;
+};
+
 /**
- * Walks day by day from today with the rules the 45-day forecast uses (paycheck, bills, everyday spending; day 0 includes
- * today's spending) and adds what a long window needs: interest on the card and car loan, loan payoff, and optional
- * growth on savings and the IRA. "current" changes nothing. "coach" sends checking's surplus through plan v1 at every
- * month end.
+ * One walk through the window. Day by day, in the forecast's own order: paycheck, bills (with interest and payoff on
+ * the card and car loan), recurring payments found in history, then everyday spending, whatever `spend` says it is.
+ * At each month end savings and the IRA grow if asked to, and the Coach's plan, if chosen, sweeps checking's surplus.
  */
-export function projectOne(
+function runPath(
   strategy: "current" | "coach",
   state: LedgerState,
   persona: Persona,
   facts: FactsSnapshot,
   today: string,
   opts: ProjectionOptions,
-): Projection {
+  spend: (day: CalDay) => number,
+  cal: CalDay[],
+  light: boolean,
+): PathResult {
   const a = persona.accounts;
-  const bal: Balances = {
-    checking: state.balances.checking,
-    savings: state.balances.savings,
-    ira: state.balances.ira,
-    card: state.balances.card,
-    carLoan: state.balances.car_loan,
-  };
-  const start = point(today, bal);
+  const bal: Balances = { checking: state.balances.checking, savings: state.balances.savings, ira: state.balances.ira, card: state.balances.card, carLoan: state.balances.car_loan };
   const cushion = THRESHOLDS.cushion;
-  const monthlyBills = persona.recurringBills.reduce((s, b) => s + b.amount, 0);
-  const buffer = r2(monthlyBills + cushion);
-  const essentials = monthlyEssentials(persona);
+  const buffer = r2(persona.recurringBills.reduce((s, b) => s + b.amount, 0) + cushion);
 
-  // Coach state
   const goals = persona.goals.map((g) => ({ ...g }));
   let unclaimedMatch = a.ira.unclaimedMatchThisYear;
-  const planFacts = structuredClone(facts);
-  planFacts.shortfall = null;
+  const planFacts = strategy === "coach" ? structuredClone(facts) : facts;
+  if (strategy === "coach") planFacts.shortfall = null;
 
   const stride = strideFor(opts.days);
   const points: ProjectionPoint[] = [];
+  const nw: number[] = [];
   let lowest = { date: today, balance: Number.POSITIVE_INFINITY };
   let firstNegativeDate: string | null = null;
   let cardPaidOffDate: string | null = bal.card <= 0 ? today : null;
   let carLoanPaidOffDate: string | null = bal.carLoan <= 0 ? today : null;
   let interest = 0;
-  const startChecking = bal.checking;
 
   for (let i = 0; i < opts.days; i++) {
-    const date = addDays(today, i);
+    const day = cal[i]!;
+    const date = day.date;
 
-    if (isPayday(state.lastPaid, persona.income.everyDays, date)) bal.checking += state.paycheckAmount;
+    if (day.payday) bal.checking += state.paycheckAmount;
 
-    for (const b of persona.recurringBills) {
-      if (!billDueOn(b.dayOfMonth, date)) continue;
+    for (const b of day.bills) {
       if (b.id === "car_loan") {
         const charged = (bal.carLoan * a.carLoan.aprPercent) / 1200;
         bal.carLoan += charged;
@@ -123,10 +162,10 @@ export function projectOne(
         bal.checking -= b.amount;
       }
     }
-    for (const b of state.oneOffBills) if (!b.paid && b.dueDate === date) bal.checking -= b.amount;
-    bal.checking -= persona.spending.averageDailyDiscretionary;
+    bal.checking -= day.oneOff + day.recurring;
+    bal.checking -= spend(day);
 
-    if (date.slice(8, 10) === String(lastDayOfMonth(date)).padStart(2, "0")) {
+    if (day.monthEnd) {
       bal.savings *= 1 + opts.savingsApyPercent / 1200;
       bal.ira *= 1 + opts.iraReturnPercent / 1200;
 
@@ -164,16 +203,88 @@ export function projectOne(
     if (cardPaidOffDate === null && bal.card < 0.005) cardPaidOffDate = date;
     if (carLoanPaidOffDate === null && bal.carLoan < 0.005) carLoanPaidOffDate = date;
 
-    if ((i + 1) % stride === 0 || i === opts.days - 1) points.push(point(date, bal));
+    if ((i + 1) % stride === 0 || i === opts.days - 1) {
+      if (light) nw.push(bal.checking + bal.savings + bal.ira - bal.card - bal.carLoan);
+      else points.push(point(date, bal));
+    }
+  }
+  return { points, nw, lowest, firstNegativeDate, cardPaidOffDate, carLoanPaidOffDate, interest, end: { ...bal } };
+}
+
+const pct = (sorted: number[], q: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1))))]!;
+
+export interface ProjectionModelChoice {
+  kind: "learned" | "simple";
+  model: SpendModel | null;
+  runs: number;
+  seed: string;
+}
+
+function projectOne(
+  strategy: "current" | "coach",
+  state: LedgerState,
+  persona: Persona,
+  facts: FactsSnapshot,
+  today: string,
+  opts: ProjectionOptions,
+  choice: ProjectionModelChoice,
+): Projection {
+  const a = persona.accounts;
+  const start = point(today, { checking: state.balances.checking, savings: state.balances.savings, ira: state.balances.ira, card: state.balances.card, carLoan: state.balances.car_loan });
+  const monthlyBills = persona.recurringBills.reduce((s, b) => s + b.amount, 0);
+  const essentials = monthlyEssentials(persona);
+  const learned = choice.kind === "learned" && choice.model !== null;
+  const flat = persona.spending.averageDailyDiscretionary;
+  const mean = learned ? choice.model!.level.mean : flat;
+  const recurring = learned ? choice.model!.recurring : [];
+
+  const cal = buildCalendar(state, persona, today, opts.days, recurring);
+  // The expected path: spending at its learned level every day.
+  const path = runPath(strategy, state, persona, facts, today, opts, () => mean, cal, false);
+
+  // Simulated futures: the same random spending days for both strategies (seeded by run), so the two are comparable.
+  let uncertainty: Projection["uncertainty"] = null;
+  if (learned && choice.runs > 0) {
+    const model = choice.model!;
+    const n = path.points.length;
+    const cols: number[][] = Array.from({ length: n }, () => []);
+    const finals: number[] = [];
+    let negative = 0,
+      cardGone = 0;
+    for (let r = 0; r < choice.runs; r++) {
+      const sampler = makeDaySampler(model, mulberry32(hashSeed(`${choice.seed}:${r}`)));
+      const res = runPath(strategy, state, persona, facts, today, opts, (day) => sampler(day.date, day.weekday), cal, true);
+      res.nw.forEach((v, k) => cols[k]!.push(v));
+      finals.push(res.nw[res.nw.length - 1]!);
+      if (res.firstNegativeDate) negative++;
+      if (res.end.card < 0.005) cardGone++;
+    }
+    const sorted = cols.map((c) => c.slice().sort((x, y) => x - y));
+    finals.sort((x, y) => x - y);
+    uncertainty = {
+      runs: choice.runs,
+      p10: sorted.map((c) => r2(pct(c, 0.1))),
+      p50: sorted.map((c) => r2(pct(c, 0.5))),
+      p90: sorted.map((c) => r2(pct(c, 0.9))),
+      endNetWorth: { p10: r2(pct(finals, 0.1)), p50: r2(pct(finals, 0.5)), p90: r2(pct(finals, 0.9)) },
+      probCheckingNegative: r2(negative / choice.runs),
+      probCardPaidOffByEnd: r2(cardGone / choice.runs),
+    };
   }
 
-  const end = points[points.length - 1]!;
+  const end = path.points[path.points.length - 1]!;
   const months = opts.days / 30.4375;
-  const idle = persona.recurringBills.find((b) => b.id === "rent");
+  const rent = persona.recurringBills.find((b) => b.id === "rent");
+  const m = choice.model;
   const assumptions = [
     `Paychecks of ${usd(state.paycheckAmount)} arrive every ${persona.income.everyDays} days and never change. No raises.`,
-    `Bills repeat every month as they are today (${usd(monthlyBills)} a month, rent ${usd(idle?.amount ?? 0)} included).`,
-    `Everyday spending stays at ${usd(persona.spending.averageDailyDiscretionary)} a day, paid from checking.`,
+    `Bills repeat every month as they are today (${usd(monthlyBills)} a month, rent ${usd(rent?.amount ?? 0)} included).`,
+    learned && m
+      ? m.basis === "history"
+        ? `Everyday spending is learned from your last ${m.level.daysObserved} days: about ${usd(m.level.mean)} a day (your profile says ${usd(flat)}). It moves only as far as the evidence does. Single days vary a lot, by about ${usd(m.level.sd)}.`
+        : `Everyday spending is assumed at ${usd(flat)} a day, with single days varying by about ${usd(m.level.sd)}. It will adjust as your own spending history builds.`
+      : `Everyday spending stays at ${usd(flat)} a day, paid from checking.`,
+    ...(learned && m ? m.recurring.map((r) => `Found a payment that repeats: ${r.label}, ${usd(r.amount)} ${r.everyDays === 30 ? "a month" : r.everyDays === 14 ? "every two weeks" : "a week"} (seen ${r.seen} times). It is included.`) : []),
     `The card charges ${a.card.aprPercent}% a year, added each month. You pay the ${usd(a.card.minimumPayment)} minimum and add nothing new to it.`,
     `The car loan charges ${a.carLoan.aprPercent}% a year and you pay ${usd(a.carLoan.monthlyPayment)} a month until it is gone.`,
     opts.savingsApyPercent > 0 ? `Savings earns ${opts.savingsApyPercent}% a year.` : "Savings earns no interest (none is assumed).",
@@ -184,30 +295,51 @@ export function projectOne(
     "The IRA and car loan are simulated; loans you add by text are not included.",
   ];
   if (strategy === "coach") {
+    const buffer = r2(monthlyBills + THRESHOLDS.cushion);
     assumptions.push(
-      `At each month end, money in checking above ${usd(buffer)} (a month of bills plus the ${usd(cushion)} cushion) is sent by the Coach's plan: employer match, then the card, then the emergency fund, goals, and the rest.`,
+      `At each month end, money in checking above ${usd(buffer)} (a month of bills plus the ${usd(THRESHOLDS.cushion)} cushion) is sent by the Coach's plan: employer match, then the card, then the emergency fund, goals, and the rest.`,
+    );
+  }
+  if (uncertainty) {
+    assumptions.push(
+      `The shaded range is the middle 80% of ${uncertainty.runs} simulated futures. In each, spending days are drawn from your own history, the true spending level may be a bit off the estimate, and habits drift a few percent a month. It assumes your habits stay roughly steady: a sudden change takes a few weeks to show.`,
     );
   }
 
   return {
     strategy,
     start,
-    points,
+    points: path.points,
     summary: {
       startNetWorth: start.netWorth,
       endNetWorth: end.netWorth,
       change: r2(end.netWorth - start.netWorth),
-      lowestChecking: lowest,
-      firstNegativeDate,
-      cardPaidOffDate: cardPaidOffDate === today && state.balances.card > 0 ? null : cardPaidOffDate,
-      carLoanPaidOffDate: carLoanPaidOffDate === today && state.balances.car_loan > 0 ? null : carLoanPaidOffDate,
-      interestPaid: r2(interest),
+      lowestChecking: path.lowest,
+      firstNegativeDate: path.firstNegativeDate,
+      cardPaidOffDate: path.cardPaidOffDate === today && state.balances.card > 0 ? null : path.cardPaidOffDate,
+      carLoanPaidOffDate: path.carLoanPaidOffDate === today && state.balances.car_loan > 0 ? null : path.carLoanPaidOffDate,
+      interestPaid: r2(path.interest),
       emergencyFundMonthsEnd: r2(end.savings / essentials),
-      avgMonthlyChangeInChecking: strategy === "current" ? r2((end.checking - startChecking) / months) : null,
+      avgMonthlyChangeInChecking: strategy === "current" ? r2((end.checking - start.checking) / months) : null,
     },
     assumptions,
+    model:
+      learned && m
+        ? {
+            kind: "learned",
+            dailySpendMean: r2(m.level.mean),
+            dailySpendSd: r2(m.level.sd),
+            basis: m.basis,
+            daysObserved: m.level.daysObserved,
+            weightOnHistory: m.level.weightOnData,
+            detectedRecurring: m.recurring.map((r) => ({ label: r.label, amount: r.amount, everyDays: r.everyDays, nextDate: r.nextDate, seen: r.seen })),
+          }
+        : { kind: "simple", dailySpendMean: flat, dailySpendSd: 0, basis: "profile", daysObserved: 0, weightOnHistory: 0, detectedRecurring: [] },
+    uncertainty,
   };
 }
+
+export const DEFAULT_RUNS = 300;
 
 export function project(
   req: ProjectionRequest,
@@ -218,8 +350,11 @@ export function project(
 ): ProjectionResponse {
   const days = horizonDays(today, req.amount, req.unit);
   const opts: ProjectionOptions = { days, iraReturnPercent: req.iraReturnPercent ?? 0, savingsApyPercent: req.savingsApyPercent ?? 0 };
-  const current = projectOne("current", state, persona, facts, today, opts);
-  const coach = req.compare ? projectOne("coach", state, persona, facts, today, opts) : null;
+  const kind = req.model ?? "learned";
+  const model = kind === "learned" ? fitSpendModel(state, persona, today) : null;
+  const choice: ProjectionModelChoice = { kind, model, runs: kind === "learned" ? req.runs ?? DEFAULT_RUNS : 0, seed: `${today}|${days}|${model ? model.level.mean : 0}` };
+  const current = projectOne("current", state, persona, facts, today, opts, choice);
+  const coach = req.compare ? projectOne("coach", state, persona, facts, today, opts, choice) : null;
   const earlier =
     coach && current.summary.cardPaidOffDate && coach.summary.cardPaidOffDate
       ? daysBetween(coach.summary.cardPaidOffDate, current.summary.cardPaidOffDate)
