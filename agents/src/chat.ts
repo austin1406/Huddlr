@@ -103,6 +103,21 @@ async function recentConversation(db: Queryable, phone: string, inboundId: numbe
   return { lines, numbers, lastSpeaker, lastText: lastOut?.text ?? null };
 }
 
+/**
+ * "What do I do if I want to take out a loan?" when Gemini's answer can't be sent: what to check before signing,
+ * with the user's real numbers. Built in code from P1's facts.
+ */
+export function loanAdviceText(facts: FactsSnapshot): string {
+  const f = facts.forecast;
+  const usd = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const payday = new Date(`${f.nextPayday}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const current = facts.accounts.find((a) => a.id === "car_loan")?.monthlyPayment;
+  const budget = f.safeToSpendUntilPayday > 0
+    ? `Right now you have ${usd(f.safeToSpendUntilPayday)} safe to spend until payday on ${payday}`
+    : `Right now Checking is tight before payday on ${payday}`;
+  return `Before you sign, check three things: how much you'd borrow, the interest rate, and the monthly payment. Then make sure that payment fits: ${budget}${current ? `, and your current loan already takes ${usd(current)} a month` : ""}. Text me the amount, rate and payment and I'll break it down.`;
+}
+
 /** "explain…", "what does APR mean", "what's utilization", "I don't get it", "in simple words". */
 export function isExplainRequest(text: string): boolean {
   return /\b(explain|eli5|in simple (?:words|terms)|simpler|break (?:it|that) down|i don'?t (?:get|understand)|what (?:does|do) (?:\w+\s){0,4}mean|what(?:'s| is| are) (?:an? |the |my )?(?:apr|interest rate|utili[sz]ation|runway|cushion|buffer|employer match|match|shortfall|safe to spend|must-pay bills|essentials|ira|emergency fund|minimum payment))\b/i.test(text);
@@ -156,7 +171,7 @@ export async function handleChat(
   },
   inbound: { id: number; text: string | null },
   now: Date,
-): Promise<{ learned: number; responder: CharacterId | null; debate?: CharacterId[] }> {
+): Promise<{ learned: number; responder: CharacterId | null; debate?: CharacterId[]; source?: "model" | "retry" | "template"; why?: string }> {
   const text = inbound.text?.trim() ?? "";
   if (!text) return { learned: 0, responder: null };
   const base = { user_phone: deps.userPhone, reply_to: inbound.id, thread_key: `inbound:${inbound.id}`, priority: 1 as const, created_sim_at: now.toISOString() };
@@ -306,7 +321,8 @@ export async function handleChat(
     // "What does that mean?" must rephrase the last message, not repeat it (code-enforced, one retry).
     ...((explain || followUp) && recent.lastText ? { avoidRepeating: [recent.lastText] } : {}),
     // Loan, asked how things stand, must count the loans the user told us about: the total across all of them.
-    ...(responder === "car_loan" && !explain && reported.some((l) => l.owed != null)
+    // (Not for "thinking about a new loan": the total isn't the answer there, and requiring it got good answers rejected.)
+    ...(responder === "car_loan" && !explain && !thinkingAboutLoan && reported.some((l) => l.owed != null)
       ? { mustMention: [{ text: `$${totalLoansOwed(facts, reported).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, why: "the total owed on all their loans, including the ones they told you about" }] }
       : {}),
     // The Coach explaining the waiting plan is held to the same code-enforced rules as in a debate: the exact YES line,
@@ -325,11 +341,18 @@ export async function handleChat(
       ...(thinkingAboutLoan ? [{ safeToSpendUntilPayday: facts.forecast.safeToSpendUntilPayday, nextPayday: facts.forecast.nextPayday }] : []),
     ],
   });
-  // An "explain" whose Gemini answer couldn't be sent gets a plain explanation, not the character's usual line.
-  let text2 = explain && !explainingPlan && r.source === "template" ? explainTemplate(responder, facts) : r.text;
-  // The Loan character's fallback still counts the loans the user told us about.
-  if (responder === "car_loan" && r.source === "template" && reported.some((l) => l.owed != null))
+  // When Gemini's answer can't be sent, the fallback still answers the question asked:
+  //   an "explain" gets a plain explanation; "thinking about a new loan" gets what to check before signing.
+  let text2 =
+    r.source !== "template" ? r.text
+    : thinkingAboutLoan ? loanAdviceText(facts)
+    : explain && !explainingPlan ? explainTemplate(responder, facts)
+    : r.text;
+  // The Loan character's status fallback still counts the loans the user told us about.
+  if (responder === "car_loan" && r.source === "template" && !thinkingAboutLoan && reported.some((l) => l.owed != null))
     text2 += ` With your other loans, you owe $${totalLoansOwed(facts, reported).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} on loans in total.`;
   await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:answer`, speaker: responder, text: text2 });
-  return { learned: 0, responder };
+  // Why a fallback was used (rate limit, timeout, a number the checker rejected, a rule it broke), for the server log.
+  const why = r.source === "template" ? r.attempts.map((a) => a.error ?? (a.ok === false ? `ungrounded ${JSON.stringify(a.ungrounded?.map((u) => u.raw) ?? [])}` : "")).filter(Boolean).join("; ") || "no time left" : undefined;
+  return { learned: 0, responder, source: r.source, ...(why ? { why } : {}) };
 }
