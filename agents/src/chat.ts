@@ -6,6 +6,7 @@ import { extractNumbers } from "./checker";
 import type { Queryable } from "./db";
 import { extractMemory, loadMemory, saveMemory } from "./memory";
 import { queueOutbox } from "./outbox";
+import { isRecallQuestion, recallAnswer } from "./recall";
 
 /** Who answers a question, by what it mentions. The Coach takes anything general. */
 export function pickResponder(text: string): CharacterId {
@@ -26,6 +27,14 @@ export async function handleChat(
   const text = inbound.text?.trim() ?? "";
   if (!text) return { learned: 0, responder: null };
   const base = { user_phone: deps.userPhone, reply_to: inbound.id, thread_key: `inbound:${inbound.id}`, priority: 1 as const, created_sim_at: now.toISOString() };
+
+  // "What did we decide?" is answered from the record (last call + latest plan), never from the model.
+  if (isRecallQuestion(text)) {
+    const facts = await deps.facts();
+    const answer = (await recallAnswer(deps.db, deps.userPhone, facts.timezone)) ?? "Nothing's been decided yet: no calls or plans on record. Text me any time you want the crew to weigh in.";
+    await queueOutbox(deps.db, { ...base, idempotency_key: `inbound:${inbound.id}:recall`, speaker: "coach", text: answer });
+    return { learned: 0, responder: "coach" };
+  }
 
   const learned = extractMemory(text);
   if (learned.length) {
