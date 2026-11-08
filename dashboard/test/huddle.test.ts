@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildHuddle, decide, parseDecision, roomToSpend, signLink, statusFor, verifyLink } from "../src/huddle.js";
+import { buildHuddle, decide, guessDecision, parseDecision, roomToSpend, signLink, statusFor, understand, verifyLink } from "../src/huddle.js";
 
 const facts = () => JSON.parse(readFileSync(new URL("../../contracts/fixtures/facts.fixture.json", import.meta.url), "utf8"));
 const cast = JSON.parse(readFileSync(new URL("../../contracts/cast.json", import.meta.url), "utf8")).characters;
@@ -84,4 +84,52 @@ test("private links verify, expire, and reject tampering", () => {
   assert.equal(verifyLink("s3cret", `${forged}.${s}`, 1_000_000), null);
   assert.equal(verifyLink("", t, 1_000_000), null);
   assert.ok(p);
+});
+
+test("typed questions are understood without AI when it is unavailable", () => {
+  const g = (t: string) => guessDecision(t, "2026-11-08");
+  assert.deepEqual(g("What if I buy a $300 TV?"), { kind: "buy", amount: 300 });
+  assert.deepEqual(g("what if I add a $50 a month gym membership"), { kind: "monthly", amount: 50 });
+  assert.deepEqual(g("move $200 into savings"), { kind: "save", amount: 200 });
+  assert.deepEqual(g("pay $300 extra on my card"), { kind: "pay_card", amount: 300 });
+  assert.deepEqual(g("pay 1.5k extra on the car loan"), { kind: "pay_car", amount: 1500 });
+  assert.deepEqual(g("pay 2k extra on the car loan"), { kind: "pay_car", amount: 2000 });
+  assert.deepEqual(g("put $100 in my IRA"), { kind: "ira", amount: 100 });
+  assert.deepEqual(g("what if I lost my job for 2 months"), { kind: "lose_income", months: 2 });
+  assert.deepEqual(g("take $150 out of savings"), { kind: "from_savings", amount: 150 });
+  assert.equal(g("should I be worried?"), null);
+});
+
+test("the AI only picks the decision; bad AI output falls back to the rules", async () => {
+  const ai = async () => '{"kind":"later_expense","amount":600,"date":"2026-12-10","label":"flight home"}';
+  assert.deepEqual(await understand("flight home Dec 10 for $600", "2026-11-08", ai), {
+    decision: { kind: "later_expense", amount: 600, date: "2026-12-10", label: "flight home" },
+    by: "ai",
+  });
+  const junk = async () => "sure! you should totally buy it";
+  assert.deepEqual(await understand("buy a $40 game", "2026-11-08", junk), { decision: { kind: "buy", amount: 40 }, by: "rules" });
+  const down = async () => {
+    throw new Error("429");
+  };
+  assert.equal((await understand("buy a $40 game", "2026-11-08", down)).by, "rules");
+  const sneaky = async () => '{"kind":"transfer_all","amount":99999}';
+  assert.equal((await understand("buy a $40 game", "2026-11-08", sneaky)).decision?.kind, "buy");
+});
+
+test("a new monthly bill shows the yearly cost and the savings-rate change", async () => {
+  const r = await decide(facts(), { kind: "monthly", amount: 50, label: "gym" }, noWhatIf);
+  assert.equal(r.title, "If you add gym for $50 a month");
+  assert.match(r.reactions.find((x) => x.id === "savings")!.text, /\$600 a year/);
+});
+
+test("a cost on a future date only hits Checking from that day on", async () => {
+  const r = await decide(facts(), { kind: "later_expense", amount: 100, date: "2026-12-15", label: "gift" }, noWhatIf);
+  assert.equal(r.reactions.find((x) => x.id === "checking")!.after, "lowest $147.50"); // after the Dec 3 low
+  const far = await decide(facts(), { kind: "later_expense", amount: 900, date: "2027-03-01", label: "trip" }, noWhatIf);
+  assert.match(far.verdict, /set aside about/);
+});
+
+test("paying the car loan points out the card saves more", async () => {
+  const r = await decide(facts(), { kind: "pay_car", amount: 20 }, noWhatIf);
+  assert.match(r.reactions.find((x) => x.id === "card")!.text, /24% vs 6\.9%/);
 });

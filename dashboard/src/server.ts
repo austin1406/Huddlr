@@ -8,7 +8,7 @@ import { basicAuth } from "hono/basic-auth";
 import pg from "pg";
 import { loadChat, loadFacts, loadOutboxStats, loadProposals, maskPhone, type Db } from "./state.js";
 import { loadSim, runControl, type ControlDeps } from "./control.js";
-import { buildHuddle, decide, parseDecision, signLink, verifyLink } from "./huddle.js";
+import { buildHuddle, decide, parseDecision, signLink, understand, verifyLink, type Decision } from "./huddle.js";
 
 config({ path: fileURLToPath(new URL("../../.env", import.meta.url)), quiet: true });
 
@@ -23,6 +23,8 @@ const env = {
   agentsUrl: process.env.AGENTS_URL || `http://localhost:${process.env.AGENTS_PORT || 5000}`,
   timezone: process.env.DEMO_TIMEZONE || "America/Chicago",
   publicUrl: (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, ""),
+  geminiKey: process.env.GEMINI_API_KEY || "",
+  huddleModel: process.env.HUDDLE_MODEL || "",
 };
 const control: ControlDeps = { financeUrl: env.financeUrl, agentsUrl: env.agentsUrl, secret: env.secret, timezone: env.timezone };
 
@@ -51,23 +53,68 @@ app.get("/me/:token/api", async (c) => {
   return c.json({ huddle: buildHuddle(facts, cast), source, agentHandle: agent.rows[0]?.agent_handle ?? null });
 });
 
+const whatIf = async (scenario: unknown) => {
+  if (env.fixture) throw new Error("fixture mode");
+  const r = await fetch(`${env.financeUrl.replace(/\/$/, "")}/tools/what_if`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-huddlr-secret": env.secret },
+    body: JSON.stringify({ scenario }),
+    signal: AbortSignal.timeout(4000),
+  });
+  if (!r.ok) throw new Error(`what_if ${r.status}`);
+  return r.json();
+};
+
 app.post("/me/:token/api/decide", async (c) => {
   if (!verifyLink(env.secret, c.req.param("token"))) return c.json({ error: "expired" }, 404);
   const d = parseDecision(await c.req.json().catch(() => null));
   if (!d) return c.json({ error: "bad decision" }, 400);
   const { facts } = await loadFacts(env.financeUrl, env.secret, env.fixture);
-  const whatIf = async (scenario: unknown) => {
-    if (env.fixture) throw new Error("fixture mode");
-    const r = await fetch(`${env.financeUrl.replace(/\/$/, "")}/tools/what_if`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-huddlr-secret": env.secret },
-      body: JSON.stringify({ scenario }),
-      signal: AbortSignal.timeout(4000),
-    });
-    if (!r.ok) throw new Error(`what_if ${r.status}`);
-    return r.json();
-  };
   return c.json(await decide(facts, d, whatIf));
+});
+
+// Typed "what if…" questions. Gemini only decides which decision it is; the numbers come from decide().
+const agentsConfig = JSON.parse(readFileSync(fileURLToPath(new URL("../../contracts/agents-config.json", import.meta.url)), "utf8"));
+const askGemini = env.geminiKey
+  ? async (prompt: string) => {
+      const model = env.huddleModel || agentsConfig.character_model?.model || "gemini-flash-lite-latest";
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": env.geminiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 120, responseMimeType: "application/json" },
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!r.ok) throw new Error(`gemini ${r.status}`);
+      const j: any = await r.json();
+      return (j.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
+    }
+  : null;
+
+const askLog = new Map<string, number[]>(); // token -> recent ask times, so one link can't burn the shared AI quota
+function tooMany(token: string): boolean {
+  const now = Date.now();
+  const recent = (askLog.get(token) ?? []).filter((t) => now - t < 60_000);
+  recent.push(now);
+  askLog.set(token, recent);
+  if (askLog.size > 500) askLog.clear();
+  return recent.length > 12;
+}
+
+app.post("/me/:token/api/ask", async (c) => {
+  const token = c.req.param("token");
+  if (!verifyLink(env.secret, token)) return c.json({ error: "expired" }, 404);
+  if (tooMany(token)) return c.json({ error: "Too many questions at once. Try again in a minute." }, 429);
+  const body = await c.req.json().catch(() => ({}));
+  const text = typeof body.text === "string" ? body.text.trim().slice(0, 300) : "";
+  if (!text) return c.json({ error: "Type a question first." }, 400);
+  const { facts } = await loadFacts(env.financeUrl, env.secret, env.fixture);
+  const { decision, by } = await understand(text, facts.localDate, askGemini);
+  console.log(`[huddle] ask ${JSON.stringify(text)} -> ${JSON.stringify(decision)} (${by})`);
+  if (!decision) return c.json({ understood: false, by });
+  return c.json({ understood: true, by, decision: decision as Decision, result: await decide(facts, decision, whatIf) });
 });
 
 // For the agents service (P2): mint a link to send when the user asks "how am I doing?".

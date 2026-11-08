@@ -27,9 +27,9 @@ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 
 /* the round table */
 .top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
-.stage{position:relative;width:100%;max-width:640px;margin:8px auto 0;aspect-ratio:1/.95}
-@media (max-width:560px){.stage{aspect-ratio:1/1.12}}
-.table{position:absolute;left:50%;top:51%;width:44%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+.stage{position:relative;width:100%;max-width:640px;margin:8px auto 0;aspect-ratio:1/.86}
+@media (max-width:560px){.stage{aspect-ratio:1/1.02}}
+.table{position:absolute;left:50%;top:46%;width:44%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
   background:conic-gradient(from 180deg,var(--owe-rim) 0 50%,var(--have-rim) 50% 100%);padding:clamp(8px,2.2%,14px);box-shadow:0 18px 40px rgba(60,40,20,.18)}
 .table .top-surface{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 38%,var(--wood-hi),var(--wood) 75%);
   display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--wood-ink);padding:10%}
@@ -38,7 +38,7 @@ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 .table .hv,.table .ov{font-size:clamp(11px,2.9vw,14px);font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
 .dot.h{background:var(--have-rim)}.dot.o{background:var(--owe-rim)}
-.side{position:absolute;top:52%;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;transform:translateY(-50%);writing-mode:vertical-rl}
+.side{position:absolute;top:46%;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;transform:translateY(-50%);writing-mode:vertical-rl}
 .side.l{left:0;transform:translateY(-50%) rotate(180deg)}.side.r{right:0}
 @media (max-width:560px){.side{display:none}}
 
@@ -85,9 +85,14 @@ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 .opt[aria-pressed="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
 .ask{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
 .ask label{font-size:15px}
-.ask input{font:inherit;font-size:17px;width:120px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.ask input{font:inherit;font-size:17px;flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 .go{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer}
 .go:disabled{opacity:.5}
+.ask{flex-wrap:nowrap;margin-top:0}
+@media (max-width:420px){.ask{flex-wrap:wrap}.ask .go{width:100%}}
+.tries{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.tries .opt{font-size:13.5px;padding:6px 11px}
+.notice{margin-top:10px;font-size:14.5px;color:var(--concern)}
 .verdict{margin-top:12px;padding:10px 12px;border-radius:12px;font-weight:500;display:none}
 .verdict.ok{background:var(--good-bg)}.verdict.no{background:var(--concern-bg)}
 .reset{background:none;border:0;color:var(--accent);font:inherit;font-size:15px;cursor:pointer;padding:0;margin-top:8px;display:inline-block}
@@ -124,7 +129,7 @@ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 
 <script>
 const API = location.pathname.replace(/\/$/, "") + "/api";
-let data = null, picked = "buy", result = null, busy = false;
+let data = null, result = null, busy = false, question = "", notice = "";
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -177,22 +182,19 @@ function figure(id, mood) {
 }
 
 /* ---------- render ---------- */
-// Where each person sits: Coach at the head, money you have on the left, money you owe on the right.
-// The empty seat at the bottom is yours.
-const SEATS = { coach: 270, checking: 218, savings: 180, ira: 142, card: 322, car_loan: 38 };
+// Where each person sits: money you have on the left, money you owe on the right, your seat at the bottom.
+const SEATS = { checking: 228, savings: 180, ira: 132, card: 318, car_loan: 42 };
 function seat(p) {
   const r = result?.reactions.find((x) => x.id === p.id);
-  const isCoach = p.id === "coach";
-  const mood = isCoach ? (result ? (result.safe ? "happy" : "worried") : p.mood) : r ? r.mood : p.mood;
+  const mood = r ? r.mood : p.mood;
   const deg = SEATS[p.id] ?? 90, rad = (deg * Math.PI) / 180;
-  const left = 50 + 37 * Math.cos(rad), top = 51 + 40 * Math.sin(rad);
-  const cls = [isCoach ? "coach" : p.status, result && !isCoach ? (r?.changed ? "hit" : "dim") : ""].join(" ");
-  const sub = isCoach ? `<div class="ch">your guide</div>`
-    : r?.changed && r.after ? `<div class="ch num">→ ${esc(r.after.replace(/^lowest /, "low "))}</div>`
+  const left = 50 + 37 * Math.cos(rad), top = 46 + 42 * Math.sin(rad);
+  const cls = [p.status, result ? (r?.changed ? "hit" : "dim") : ""].join(" ");
+  const sub = r?.changed && r.after ? `<div class="ch num">→ ${esc(r.after.replace(/^lowest /, "low "))}</div>`
     : `<div class="ch">${p.group === "owe" ? "you owe" : "you have"}</div>`;
   return `<button class="seat ${cls}" data-id="${p.id}" style="left:${left.toFixed(1)}%;top:${top.toFixed(1)}%" aria-label="${esc(p.name)}, ${money(p.balance)}, ${statusWord[p.status]}. Tap for details.">
     <div class="av">${figure(p.id, mood)}</div>
-    <div class="plate"><div class="n">${p.emoji} ${esc(p.name)}</div>${isCoach ? "" : `<div class="b num">${money(p.balance)}</div>`}${sub}</div>
+    <div class="plate"><div class="n">${p.emoji} ${esc(p.name)}</div><div class="b num">${money(p.balance)}</div>${sub}</div>
   </button>`;
 }
 const mini = (id, mood) => `<div class="mini">${figure(id, mood)}</div>`;
@@ -230,20 +232,19 @@ function timeline(t) {
   </svg>`;
 }
 
-const OPTS = [
-  { k: "buy", label: "🛍️ Buy something", ask: "How much?", def: 300 },
-  { k: "save", label: "🐷 Move to Savings", ask: "How much?", def: 200 },
-  { k: "pay_card", label: "💳 Pay down the card", ask: "How much?", def: 300 },
-  { k: "ira", label: "🌱 Add to IRA", ask: "How much?", def: 100 },
-  { k: "lose_income", label: "😬 Lose my paycheck", ask: "For how many months?", def: 1, months: true },
+const EXAMPLES = [
+  "What if I buy a $300 TV?",
+  "What if I add a $50 a month gym membership?",
+  "What if I move $200 into savings?",
+  "What if I pay $300 extra on my card?",
+  "What if I put $100 in my IRA?",
+  "What if I lost my paycheck for 1 month?",
 ];
 
 function render() {
   const h = data.huddle;
-  const o = OPTS.find((x) => x.k === picked);
-  const coachText = result ? result.verdict : h.coach.bestMove;
   const c = h.coach.counts;
-  const all = [...h.people, h.coach];
+  const all = h.people;
   $("#app").innerHTML = `
     <div class="top"><div><h1>${esc(h.firstName ? h.firstName + "'s" : "Your")} money huddle</h1>
       <div class="sub">Everyone at one table · ${esc(day(h.localDate))}</div></div></div>
@@ -259,22 +260,24 @@ function render() {
     </div>
     <div class="tap">Tap anyone at the table to see their details</div>
 
+    <h2>Ask “what if…”</h2>
+    <div class="try">
+      <form class="ask" id="ask">
+        <input id="q" type="text" maxlength="300" autocomplete="off" placeholder="What if I buy a $400 phone?" value="${esc(question)}" aria-label="Ask a what-if question">
+        <button class="go" ${busy ? "disabled" : ""}>${busy ? "Thinking…" : "Ask the table"}</button>
+      </form>
+      ${notice ? `<div class="notice">${esc(notice)}</div>` : ""}
+      <div class="tries"><span class="sub">Or try:</span> ${EXAMPLES.map((x) => `<button class="opt" data-q="${esc(x)}">${esc(x.replace(/^What if I /, "").replace(/\?$/, ""))}</button>`).join("")}</div>
+    </div>
+
     <div class="say ${result ? (result.safe ? "ok" : "no") : ""}">
-      <div class="who">${h.coach.emoji} Coach${result ? " · " + esc(result.title) : " says"}</div>
-      <div class="msg">${esc(coachText)}</div>
+      <div class="who">${result ? esc(result.title) : "Your next best move"}</div>
+      <div class="msg">${result ? "Bottom line: " : ""}${esc(result ? result.verdict : h.coach.bestMove)}</div>
       ${result ? `<ul class="chat">${result.reactions.map((r) => {
           const p = h.people.find((x) => x.id === r.id);
           return p ? `<li class="${r.changed ? "" : "same"}">${mini(p.id, r.mood)}<div class="bub"><b>${p.emoji} ${esc(p.name)}</b><br>${esc(r.text)}${r.before && r.after ? `<div class="ba num">${esc(r.before)} → <b>${esc(r.after)}</b></div>` : ""}</div></li>` : "";
         }).join("")}</ul><button class="reset" id="reset">← Back to today</button>`
         : `<div class="chips">${c.concern ? `<span class="chip concern">${c.concern} needs attention</span>` : ""}${c.watch ? `<span class="chip watch">${c.watch} to keep an eye on</span>` : ""}${c.good ? `<span class="chip good">${c.good} doing well</span>` : ""}</div>`}
-    </div>
-
-    <h2>Try a decision</h2>
-    <div class="try">
-      <div class="opts">${OPTS.map((x) => `<button class="opt" data-k="${x.k}" aria-pressed="${x.k === picked}">${x.label}</button>`).join("")}</div>
-      <form class="ask" id="ask"><label for="amt">${o.ask}</label>
-        <input id="amt" class="num" inputmode="${o.months ? "numeric" : "decimal"}" value="${o.def}" aria-label="${o.ask}">
-        <button class="go" ${busy ? "disabled" : ""}>See how everyone reacts</button></form>
     </div>
 
     <h2>Next 6 weeks in Checking</h2>
@@ -289,7 +292,7 @@ function render() {
 
 function openSheet(id) {
   const h = data.huddle;
-  const p = id === "coach" ? h.coach : h.people.find((x) => x.id === id);
+  const p = h.people.find((x) => x.id === id);
   if (!p) return;
   const sms = data.agentHandle ? `sms:${encodeURIComponent(data.agentHandle)}&body=${encodeURIComponent("@" + p.name + " ")}` : null;
   $("#sheet").innerHTML = `<button class="x" aria-label="Close" id="close">×</button>
@@ -304,28 +307,35 @@ function openSheet(id) {
 const closeSheet = () => $("#scrim").classList.remove("on");
 
 /* ---------- events ---------- */
+async function ask(text) {
+  question = text.trim();
+  if (!question) return $("#q").focus();
+  busy = true; notice = ""; render();
+  try {
+    const r = await fetch(API + "/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: question }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) notice = j.error || "Something went wrong. Try again.";
+    else if (!j.understood) notice = "I couldn't tell what you meant. Try including an amount, like “buy a $300 TV” or “move $200 to savings”.";
+    else result = j.result;
+  } catch { notice = "Couldn't reach the table. Try again."; }
+  busy = false; render();
+  // Wide screens see the table and the replies together; on a phone, jump to the replies.
+  if (result && !notice) (innerWidth < 720 ? $(".say") : $(".stage")).scrollIntoView({ behavior: "smooth", block: "start" });
+}
 document.addEventListener("click", (e) => {
   const opt = e.target.closest(".opt");
-  if (opt) { picked = opt.dataset.k; render(); $("#amt").select(); return; }
-  if (e.target.id === "reset") { result = null; render(); return; }
+  if (opt) return ask(opt.dataset.q);
+  if (e.target.id === "reset") { result = null; question = ""; render(); return; }
   if (e.target.id === "close" || e.target.id === "scrim") return closeSheet();
   const p = e.target.closest(".seat");
   if (p) openSheet(p.dataset.id);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
-document.addEventListener("submit", async (e) => {
+document.addEventListener("input", (e) => { if (e.target.id === "q") question = e.target.value; });
+document.addEventListener("submit", (e) => {
   if (e.target.id !== "ask") return;
   e.preventDefault();
-  const v = Number(String($("#amt").value).replace(/[$,\s]/g, ""));
-  if (!(v > 0)) return $("#amt").focus();
-  busy = true; render();
-  const o = OPTS.find((x) => x.k === picked);
-  try {
-    const r = await fetch(API + "/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(o.months ? { kind: picked, months: v } : { kind: picked, amount: v }) });
-    result = r.ok ? await r.json() : null;
-  } catch { result = null; }
-  busy = false; render();
-  $(".stage").scrollIntoView({ behavior: "smooth", block: "start" });
+  ask($("#q").value);
 });
 
 async function load() {
@@ -333,7 +343,7 @@ async function load() {
     const r = await fetch(API);
     if (r.status === 404) { $("#app").innerHTML = `<div class="err"><h2>This link has expired</h2>Text “how am I doing?” to get a new one.</div>`; return; }
     data = await r.json();
-    if (!$("#scrim").classList.contains("on") && !result && document.activeElement?.id !== "amt") render();
+    if (!$("#scrim").classList.contains("on") && !result && document.activeElement?.id !== "q" && !busy) render();
   } catch { if (!data) $("#app").innerHTML = `<div class="err">Couldn't load right now. Pull to refresh.</div>`; }
 }
 load();

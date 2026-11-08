@@ -41,14 +41,17 @@ The buttons call `POST /api/control/:action` on the dashboard (same login), whic
 ## The Huddle (the user's own page)
 
 `/me/<token>` is a page for the **user**, not the team: their accounts as people sitting around a round table.
-Net worth sits in the middle of the table; Coach is at the head, the money you have sits on the left, what you owe
-sits on the right, and the empty seat at the bottom is yours. Each person shows their balance, a face (happy / okay / worried from the real health status) and one plain sentence
-built from P1's numbers (no AI, so every number is exact). Coach sits on top with the one next move.
+Net worth sits in the middle of the table; the money you have sits on the left, what you owe sits on the right.
+(Coach isn't at this table: Coach stays in iMessage and calls.) Each person shows their balance, a face (happy / okay / worried from the real health status) and one plain sentence
+built from P1's numbers (no AI, so every number is exact). Under the table: your one next best move.
 
-- **Try a decision**: everyone at the table reacts (faces change, the people affected bounce) and their replies show
-  under Coach like a group chat. Options: buy something, move money to Savings, pay down the card, add to the IRA, or lose your paycheck.
-  Everyone says what it does to them (before → after) and Coach gives a verdict. Buying and losing income use P1's
-  `/tools/what_if`; moving money is simple math on the same snapshot. Nothing moves real (or simulated) money.
+- **Ask "what if…"**: the user types any question ("what if I get a $45 a month gym membership?") or taps an example.
+  Gemini (`GEMINI_API_KEY`, model from `contracts/agents-config.json`, override with `HUDDLE_MODEL`) only decides
+  *which* kind of decision it is: buy now, new monthly bill, one-time cost on a date, move to/from Savings, pay extra
+  on the card or car loan, add to the IRA, or lose your paycheck. Every number is then computed by code: P1's
+  `/tools/what_if` for purchases, monthly bills, future costs and lost income, simple math for moving money.
+  If Gemini is down or unsure, simple word rules take over. Everyone at the table reacts (faces change, the people
+  affected bounce) and their replies show under a plain "bottom line". Max 12 questions a minute per link.
 - **Tap a person** for their details, what's coming up, and a "Text them" button that opens iMessage to the agent number.
 - **Next 6 weeks**: Checking's forecast with paydays and bills marked by who they belong to.
 

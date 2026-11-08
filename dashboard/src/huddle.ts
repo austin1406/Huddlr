@@ -297,15 +297,26 @@ function pickBestMove(facts: any, people: Person[]): string {
 }
 
 // ---------- try a decision ----------
+// The AI (or the quick buttons) only pick WHICH decision this is. Every number below comes from code:
+// P1's what-if engine when it models the case, otherwise simple arithmetic on the same snapshot.
 export type Decision =
-  | { kind: "buy"; amount: number }
+  | { kind: "buy"; amount: number; label?: string } // spend from Checking today
+  | { kind: "monthly"; amount: number; label?: string; dayOfMonth?: number } // new monthly bill
+  | { kind: "later_expense"; amount: number; date: string; label?: string } // one-time cost on a future date
   | { kind: "save"; amount: number } // Checking -> Savings
+  | { kind: "from_savings"; amount: number } // Savings -> Checking
   | { kind: "pay_card"; amount: number } // Checking -> Card
+  | { kind: "pay_car"; amount: number } // Checking -> Car Loan
   | { kind: "ira"; amount: number } // Checking -> IRA
   | { kind: "lose_income"; months: number };
 
+export const DECISION_KINDS = ["buy", "monthly", "later_expense", "save", "from_savings", "pay_card", "pay_car", "ira", "lose_income"] as const;
+
 export type Reaction = { id: string; mood: Mood; text: string; before?: string; after?: string; changed: boolean };
 export type DecisionResult = { title: string; verdict: string; safe: boolean; reactions: Reaction[]; source: "what_if" | "math" };
+
+const cleanLabel = (x: unknown) =>
+  typeof x === "string" ? x.replace(/[^\p{L}\p{N} '&.,-]/gu, "").trim().slice(0, 40) || undefined : undefined;
 
 export function parseDecision(body: any): Decision | null {
   const kind = body?.kind;
@@ -313,9 +324,33 @@ export function parseDecision(body: any): Decision | null {
     const m = Math.round(Number(body.months));
     return m >= 1 && m <= 12 ? { kind, months: m } : null;
   }
-  const amount = roundMoney(Number(body?.amount));
-  if (!["buy", "save", "pay_card", "ira"].includes(kind) || !(amount > 0) || amount > 1_000_000) return null;
-  return { kind, amount };
+  const amount = roundMoney(Number(String(body?.amount ?? "").replace(/[$,]/g, "")));
+  if (!DECISION_KINDS.includes(kind) || !(amount > 0) || amount > 1_000_000) return null;
+  const label = cleanLabel(body.label);
+  if (kind === "buy") return { kind, amount, label };
+  if (kind === "monthly") {
+    const dom = Math.round(Number(body.dayOfMonth));
+    return { kind, amount, label: label ?? "new bill", dayOfMonth: dom >= 1 && dom <= 28 ? dom : undefined };
+  }
+  if (kind === "later_expense") {
+    if (typeof body.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return null;
+    return { kind, amount, date: body.date, label: label ?? "expense" };
+  }
+  return { kind, amount } as Decision;
+}
+
+/** What a decision does to Checking's balance on each forecast day (negative = less money). */
+function checkingDeltas(f: any, d: Decision): number[] {
+  const days: { date: string }[] = f.days;
+  if (d.kind === "lose_income" ) return days.map(() => 0); // handled by what-if
+  if (d.kind === "monthly") {
+    const dom = d.dayOfMonth ?? Number(f.startDate.slice(8, 10));
+    let total = 0;
+    return days.map((x) => (Number(x.date.slice(8, 10)) === dom ? (total -= d.amount) : total));
+  }
+  if (d.kind === "later_expense") return days.map((x) => (x.date >= d.date ? -d.amount : 0));
+  const sign = d.kind === "from_savings" ? 1 : -1;
+  return days.map(() => sign * d.amount);
 }
 
 type WhatIf = (scenario: unknown) => Promise<any>;
@@ -326,8 +361,10 @@ export async function decide(facts: any, d: Decision, whatIf: WhatIf): Promise<D
   const ind = (id: string) => facts.indicators.find((i: any) => i.id === id);
   const runway = ind("runway");
   const ess = runway?.inputs.monthlyEssentials ?? 0;
+  const goalMonths = runway?.goodAt ?? 3;
   const sv = acct("savings")?.balance ?? 0;
   const same = (id: string, text = "No change for me."): Reaction => ({ id, mood: "okay", text, changed: false });
+  const carBill = facts.upcomingBills.find((b: any) => b.id === "car_loan");
 
   if (d.kind === "lose_income") {
     const r = await whatIf({ type: "lose_income", months: d.months }).catch(() => null);
@@ -337,7 +374,7 @@ export async function decide(facts: any, d: Decision, whatIf: WhatIf): Promise<D
     return {
       title: `If your paycheck stopped for ${d.months} month${d.months > 1 ? "s" : ""}`,
       safe: false,
-      verdict: `Savings would carry your must-pay bills for about ${days} days. A ${runway?.goodAt ?? 3}-month cushion would be ${money(roundMoney(ess * (runway?.goodAt ?? 3)))}.`,
+      verdict: `Savings would carry your must-pay bills for about ${days} days. A ${goalMonths}-month cushion would be ${money(roundMoney(ess * goalMonths))}.`,
       source: r ? "what_if" : "math",
       reactions: [
         {
@@ -349,124 +386,250 @@ export async function decide(facts: any, d: Decision, whatIf: WhatIf): Promise<D
           changed: true,
         },
         { id: "savings", mood: "worried", text: `I'd be next. I can cover about ${days} days of must-pay bills.`, changed: true },
+        { id: "ira", mood: "okay", text: "Leave me alone if you can. Early withdrawals cost penalties.", changed: false },
         { id: "card", mood: "okay", text: `Try not to lean on me. ${acct("card")?.aprPercent ?? 0}% interest adds up fast.`, changed: false },
         { id: "car_loan", mood: neg ? "worried" : "okay", text: neg ? "My payment would be at risk." : "My payment would still go through.", changed: !!neg },
-        { id: "ira", mood: "okay", text: "Leave me alone if you can. Early withdrawals cost penalties.", changed: false },
       ],
     };
   }
 
-  const A = d.amount;
-  // Buying hits Checking the same way moving money out of it does, so the forecast shifts down by A from today.
-  const lowAfter = roundMoney(f.lowest.balance - A);
-  const room = roomToSpend(f);
-  const roomAfter = roundMoney(room - A);
-  const negAfter = f.days.find((x: any) => x.balance - A < 0)?.date ?? null;
-
+  // Checking after the decision: arithmetic on the forecast, replaced by P1's what-if where it models the case.
+  if (d.kind === "later_expense" && d.date > f.endDate) {
+    const paydays = Math.max(1, Math.ceil((Date.parse(d.date) - Date.parse(f.startDate)) / (14 * 86400000)));
+    return {
+      title: `If ${d.label ?? "it"} costs ${money(d.amount)} on ${day(d.date)}`,
+      verdict: `That's past the next 6 weeks. To be ready, set aside about ${money(roundMoney(d.amount / paydays))} from each paycheck until then.`,
+      safe: true,
+      source: "math",
+      reactions: [{ id: "savings", mood: "happy", text: `Park it with me as you go, so it's ready on ${day(d.date)}.`, changed: true }],
+    };
+  }
+  if (d.kind === "later_expense" && d.date < f.startDate) d = { kind: "buy", amount: d.amount, label: d.label };
+  const deltas = checkingDeltas(f, d);
+  const after = f.days.map((x: any, i: number) => ({ date: x.date, balance: roundMoney(x.balance + deltas[i]) }));
+  let low = after.reduce((m: any, x: any) => (x.balance < m.balance ? x : m), after[0]);
+  let neg: string | null = after.find((x: any) => x.balance < 0)?.date ?? null;
   let source: DecisionResult["source"] = "math";
-  let checkingLow = lowAfter;
-  let checkingNeg: string | null = negAfter;
-  if (d.kind === "buy") {
-    const r = await whatIf({ type: "purchase_now", amount: A }).catch(() => null);
+  const scenario =
+    d.kind === "buy" ? { type: "purchase_now", amount: d.amount, label: d.label }
+    : d.kind === "monthly" ? { type: "new_recurring", amount: d.amount, dayOfMonth: d.dayOfMonth ?? Math.min(28, Number(f.startDate.slice(8, 10))), label: d.label ?? "new bill" }
+    : d.kind === "later_expense" ? { type: "one_time_expense", amount: d.amount, date: d.date, label: d.label }
+    : null;
+  if (scenario) {
+    const r = await whatIf(scenario).catch(() => null);
     if (r?.after?.lowestBalance) {
       source = "what_if";
-      checkingLow = r.after.lowestBalance.balance;
-      checkingNeg = r.after.firstNegativeDate;
+      low = r.after.lowestBalance;
+      neg = r.after.firstNegativeDate;
     }
   }
-  const checkingSafe = !checkingNeg && roundMoney(checkingLow - f.cushion) >= 0;
-  const negBill = checkingNeg ? facts.upcomingBills.find((b: any) => b.dueDate === checkingNeg) : null;
+  const room = roomToSpend(f);
+  const gains = d.kind === "from_savings";
+  const safe = !neg && roundMoney(low.balance - f.cushion) >= 0;
+  const negBill = neg ? facts.upcomingBills.find((b: any) => b.dueDate === neg) : null;
   const spare = `Checking can spare about ${money(room)} right now.`;
-  const moveVerdict = (good: string) =>
-    checkingNeg ? `Not right now. It would leave Checking below $0 on ${day(checkingNeg)}. ${spare}` : checkingSafe ? good : `Smaller is safer. ${spare}`;
-  const checking: Reaction = {
+
+  const reactions: Record<string, Reaction> = Object.fromEntries(["savings", "ira", "card", "car_loan"].map((id) => [id, same(id)]));
+  reactions.checking = {
     id: "checking",
-    mood: checkingNeg ? "worried" : checkingSafe ? "happy" : "okay",
-    text: checkingNeg
-      ? `That puts me below $0 on ${day(checkingNeg)}${negBill ? `, when ${negBill.label.toLowerCase()} is due` : ""}.`
-      : checkingSafe
-        ? `Fine by me. I'd still stay above my ${money(f.cushion)} cushion.`
-        : `Tight: my lowest would be ${money(checkingLow)}, under my ${money(f.cushion)} cushion.`,
+    mood: neg ? "worried" : safe ? "happy" : "okay",
+    text: neg
+      ? `That puts me below $0 on ${day(neg)}${negBill ? `, when ${negBill.label.toLowerCase()} is due` : ""}.`
+      : gains
+        ? `Thanks. My lowest point goes up to ${money(low.balance)}.`
+        : safe
+          ? `Fine by me. I'd still stay above my ${money(f.cushion)} cushion.`
+          : `Tight: my lowest would be ${money(low.balance)}, under my ${money(f.cushion)} cushion.`,
     before: `lowest ${money(f.lowest.balance)}`,
-    after: `lowest ${money(checkingLow)}`,
+    after: `lowest ${money(low.balance)}`,
     changed: true,
   };
-  const others = ["savings", "ira", "card", "car_loan"];
-  const reactions: Record<string, Reaction> = Object.fromEntries(others.map((id) => [id, same(id)]));
-  reactions.checking = checking;
-  if (checkingNeg && reactions.car_loan) {
-    const bill = facts.upcomingBills.find((b: any) => b.id === "car_loan");
-    if (bill && checkingNeg <= bill.dueDate) reactions.car_loan = { id: "car_loan", mood: "worried", text: `My ${money(bill.amount)} payment on ${day(bill.dueDate)} could bounce.`, changed: true };
-  }
+  if (neg && carBill && neg <= carBill.dueDate)
+    reactions.car_loan = { id: "car_loan", mood: "worried", text: `My ${money(carBill.amount)} payment on ${day(carBill.dueDate)} could bounce.`, changed: true };
+
+  const fromChecking = (good: string) =>
+    neg ? `Not right now. It would leave Checking below $0 on ${day(neg)}. ${spare}` : safe ? good : `Smaller is safer. ${spare}`;
+  const savingsTo = (newBal: number): Reaction => {
+    const newRunway = ess > 0 ? newBal / ess : 0;
+    const st = runway ? statusFor(runway, Math.round(newRunway * 100) / 100) : "watch";
+    const a = daysOfCover(sv, ess), b = daysOfCover(newBal, ess);
+    return {
+      id: "savings",
+      mood: moodOf[st],
+      text: a !== b ? `I'd cover about ${b} days of must-pay bills instead of ${a}.` : `Every bit counts. The goal is ${money(roundMoney(ess * goalMonths))} (${goalMonths} months of bills).`,
+      before: money(sv),
+      after: money(roundMoney(newBal)),
+      changed: true,
+    };
+  };
 
   let title = "";
   let verdict = "";
-  if (d.kind === "buy") {
-    title = `If you spend ${money(A)} today`;
-    verdict = checkingNeg
-      ? `Not right now. It would leave Checking below $0 on ${day(checkingNeg)}. ${spare}`
-      : checkingSafe
-        ? `You can afford this. Checking stays above its cushion.`
-        : `Possible, but it eats into your cushion. ${spare}`;
-    if (runway) reactions.savings = same("savings", checkingNeg ? "If Checking runs short, you'd have to pull from me." : "No change for me.");
-  } else if (d.kind === "save") {
-    title = `If you move ${money(A)} from Checking to Savings`;
-    const newRunway = Math.round(((sv + A) / ess) * 100) / 100;
-    const st = runway ? statusFor(runway, newRunway) : "watch";
-    reactions.savings = {
-      id: "savings",
-      mood: moodOf[st],
-      text:
-        daysOfCover(sv + A, ess) > daysOfCover(sv, ess)
-          ? `I'd cover about ${daysOfCover(sv + A, ess)} days of must-pay bills instead of ${daysOfCover(sv, ess)}.`
-          : `Every bit helps. The goal is ${money(roundMoney(ess * (runway?.goodAt ?? 3)))} (${runway?.goodAt ?? 3} months of bills).`,
-      before: money(sv),
-      after: money(roundMoney(sv + A)),
-      changed: true,
-    };
-    verdict = moveVerdict(`Good move. Your safety net grows and Checking can afford it.`);
-  } else if (d.kind === "pay_card") {
-    const card = acct("card");
-    const util = ind("credit_utilization");
-    const pay = Math.min(A, card?.balance ?? A);
-    const newBal = roundMoney((card?.balance ?? 0) - pay);
-    const newUtil = card?.limit ? (newBal / card.limit) * 100 : 0;
-    const st = util ? statusFor(util, newUtil) : "watch";
-    const saved = roundMoney((pay * (card?.aprPercent ?? 0)) / 1200);
-    reactions.card = {
-      id: "card",
-      mood: moodOf[st],
-      text: `Limit used drops from ${pct(util?.value ?? 0)} to ${pct(newUtil)}. You'd pay about ${money(saved)} less interest each month.`,
-      before: money(card?.balance ?? 0),
-      after: money(newBal),
-      changed: true,
-    };
-    title = `If you pay ${money(pay)} extra on the card`;
-    verdict = moveVerdict(`Good move. The card has your highest interest rate, and Checking can afford it.`);
-  } else if (d.kind === "ira") {
-    const ira = acct("ira");
-    const ret = ind("retirement_on_track");
-    const target = ira?.retirementTarget ?? ret?.inputs.target ?? 0;
-    const newPct = target ? ((ira.balance + A) / target) * 100 : 0;
-    reactions.ira = {
-      id: "ira",
-      mood: ret ? moodOf[statusFor(ret, newPct)] : "okay",
-      text: `I'd be at ${pct(newPct)} of your goal, up from ${pct(ret?.value ?? 0)}.${ira?.unclaimedMatchThisYear > 0 ? ` Raising your paycheck contribution also unlocks the ${money(ira.unclaimedMatchThisYear)} match.` : ""}`,
-      before: money(ira?.balance ?? 0),
-      after: money(roundMoney((ira?.balance ?? 0) + A)),
-      changed: true,
-    };
-    title = `If you put ${money(A)} into your IRA`;
-    verdict = moveVerdict(`Good for later. Checking can afford it right now.`);
+  switch (d.kind) {
+    case "buy":
+      title = `If you spend ${money(d.amount)}${d.label ? ` on ${d.label}` : ""} today`;
+      verdict = fromChecking(`You can afford this. Checking stays above its cushion.`);
+      if (neg) reactions.savings = same("savings", "If Checking runs short, you'd have to pull from me.");
+      break;
+    case "later_expense":
+      title = `If ${d.label ?? "it"} costs ${money(d.amount)} on ${day(d.date)}`;
+      verdict = neg
+        ? `Plan ahead: Checking would go below $0 on ${day(neg)}. Set aside money from your next paycheck first.`
+        : safe ? `You can cover this when it comes up.` : `Doable, but it eats into your cushion. Setting a little aside each payday would help.`;
+      break;
+    case "monthly": {
+      title = `If you add ${d.label ?? "a new bill"} for ${money(d.amount)} a month`;
+      const sr = ind("savings_rate");
+      if (sr?.inputs.income30d) {
+        const income = sr.inputs.income30d, spend = sr.inputs.spending30d;
+        const nowPct = ((income - spend) / income) * 100, newPct = ((income - spend - d.amount) / income) * 100;
+        reactions.savings = {
+          id: "savings",
+          mood: moodOf[statusFor(sr, newPct)],
+          text: `You'd keep ${pct(newPct)} of your income instead of ${pct(nowPct)}. That's ${money(roundMoney(d.amount * 12))} a year.`,
+          changed: true,
+        };
+      }
+      verdict = neg
+        ? `Not with today's budget. Checking would go below $0 on ${day(neg)}. Something else would need to go.`
+        : safe ? `It fits, but it adds up to ${money(roundMoney(d.amount * 12))} a year.` : `It fits, barely. Checking dips under its cushion, so trim somewhere else first.`;
+      break;
+    }
+    case "save":
+      title = `If you move ${money(d.amount)} from Checking to Savings`;
+      reactions.savings = savingsTo(sv + d.amount);
+      verdict = fromChecking(`Good move. Your safety net grows and Checking can afford it.`);
+      break;
+    case "from_savings": {
+      const amt = Math.min(d.amount, sv);
+      title = `If you move ${money(amt)} from Savings to Checking`;
+      reactions.savings = { ...savingsTo(sv - amt), mood: "worried" };
+      verdict = f.firstNegativeDate
+        ? `That would keep Checking from going below $0. Refill Savings when you can.`
+        : `Checking doesn't need it right now. Keeping it in Savings protects you from surprises.`;
+      break;
+    }
+    case "pay_card": {
+      const card = acct("card");
+      const util = ind("credit_utilization");
+      const pay = Math.min(d.amount, card?.balance ?? d.amount);
+      const newBal = roundMoney((card?.balance ?? 0) - pay);
+      const newUtil = card?.limit ? (newBal / card.limit) * 100 : 0;
+      const saved = roundMoney((pay * (card?.aprPercent ?? 0)) / 1200);
+      reactions.card = {
+        id: "card",
+        mood: moodOf[util ? statusFor(util, newUtil) : "watch"],
+        text: `Limit used drops from ${pct(util?.value ?? 0)} to ${pct(newUtil)}. You'd pay about ${money(saved)} less interest each month.`,
+        before: money(card?.balance ?? 0),
+        after: money(newBal),
+        changed: true,
+      };
+      title = `If you pay ${money(pay)} extra on the card`;
+      verdict = fromChecking(`Good move. The card has your highest interest rate, and Checking can afford it.`);
+      break;
+    }
+    case "pay_car": {
+      const car = acct("car_loan");
+      const card = acct("card");
+      const pay = Math.min(d.amount, car?.balance ?? d.amount);
+      const saved = roundMoney((pay * (car?.aprPercent ?? 0)) / 1200);
+      reactions.car_loan = {
+        id: "car_loan",
+        mood: neg ? "worried" : "happy",
+        text: `You'd owe ${money(roundMoney((car?.balance ?? 0) - pay))}. That saves about ${money(saved)} a month in interest.`,
+        before: money(car?.balance ?? 0),
+        after: money(roundMoney((car?.balance ?? 0) - pay)),
+        changed: true,
+      };
+      const cardFirst = card && card.balance > 0 && (card.aprPercent ?? 0) > (car?.aprPercent ?? 0);
+      if (cardFirst)
+        reactions.card = { id: "card", mood: "okay", text: `Paying me instead saves more: my rate is ${card.aprPercent}% vs ${car?.aprPercent}%.`, changed: true };
+      title = `If you pay ${money(pay)} extra on the car loan`;
+      verdict = fromChecking(cardFirst ? `It helps, but the same money on the card saves more interest.` : `Good move. Checking can afford it.`);
+      break;
+    }
+    case "ira": {
+      const ira = acct("ira");
+      const ret = ind("retirement_on_track");
+      const target = ira?.retirementTarget ?? ret?.inputs.target ?? 0;
+      const newPct = target ? ((ira.balance + d.amount) / target) * 100 : 0;
+      reactions.ira = {
+        id: "ira",
+        mood: ret ? moodOf[statusFor(ret, newPct)] : "okay",
+        text: `I'd be at ${pct(newPct)} of your goal, up from ${pct(ret?.value ?? 0)}.${ira?.unclaimedMatchThisYear > 0 ? ` Raising your paycheck contribution also unlocks the ${money(ira.unclaimedMatchThisYear)} match.` : ""}`,
+        before: money(ira?.balance ?? 0),
+        after: money(roundMoney((ira?.balance ?? 0) + d.amount)),
+        changed: true,
+      };
+      title = `If you put ${money(d.amount)} into your IRA`;
+      verdict = fromChecking(`Good for later. Checking can afford it right now.`);
+      break;
+    }
   }
 
   return {
     title,
     verdict,
-    safe: !checkingNeg && checkingSafe,
+    safe: gains ? true : safe,
     source,
     reactions: ["checking", "savings", "ira", "card", "car_loan"].map((id) => reactions[id]).filter(Boolean),
   };
+}
+
+// ---------- understanding a typed question ----------
+/** Words → a decision without AI. Used when Gemini is unavailable or unsure. */
+export function guessDecision(text: string, today: string): Decision | null {
+  const t = text.toLowerCase();
+  const m = t.match(/\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(k\b)?/);
+  const amount = m ? Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1) : NaN;
+  const months = t.match(/(\d+)\s*months?/);
+  if (/(lose|lost|quit|fired|laid off|no) .*(job|income|paycheck|pay)|without (a )?(job|income|paycheck)/.test(t))
+    return { kind: "lose_income", months: months ? Math.min(12, Math.max(1, Number(months[1]))) : 1 };
+  if (!(amount > 0)) return null;
+  if (/from (my )?savings|out of (my )?savings|use (my )?savings/.test(t)) return { kind: "from_savings", amount };
+  if (/ira|retire|401/.test(t)) return { kind: "ira", amount };
+  if (/car (loan|payment)|auto loan/.test(t) && /pay|extra/.test(t)) return { kind: "pay_car", amount };
+  if (/(credit )?card/.test(t) && /pay|extra|down/.test(t)) return { kind: "pay_card", amount };
+  if (/(put|move|add|save|saving|transfer).*(savings|save)|^save/.test(t)) return { kind: "save", amount };
+  if (/(a|per|every|each) ?month|monthly|\/ ?mo\b|subscription|membership/.test(t)) return { kind: "monthly", amount };
+  return { kind: "buy", amount };
+}
+
+export function decisionPrompt(text: string, today: string): string {
+  return `You turn a person's money question into ONE JSON object. Do not answer the question. Today is ${today}.
+Pick the kind that fits best:
+- buy: spending money now. {"kind":"buy","amount":number,"label":"short item name"}
+- monthly: a new recurring monthly cost. {"kind":"monthly","amount":number per month,"label":"...","dayOfMonth":1-28 optional}
+- later_expense: a one-time cost on a future date. {"kind":"later_expense","amount":number,"date":"YYYY-MM-DD","label":"..."}
+- save: move money from checking into savings. {"kind":"save","amount":number}
+- from_savings: move money from savings into checking. {"kind":"from_savings","amount":number}
+- pay_card: pay extra on the credit card. {"kind":"pay_card","amount":number}
+- pay_car: pay extra on the car loan. {"kind":"pay_car","amount":number}
+- ira: put money into the IRA / retirement. {"kind":"ira","amount":number}
+- lose_income: losing a job or paycheck. {"kind":"lose_income","months":1-12}
+- unknown: anything else, or no amount given. {"kind":"unknown"}
+Amounts are US dollars as plain numbers ("1.2k" = 1200). Labels are 1-4 plain words. Reply with JSON only.
+Question: ${JSON.stringify(text.slice(0, 300))}`;
+}
+
+/** Understand a typed what-if. The AI only classifies; all numbers are computed afterwards. */
+export async function understand(
+  text: string,
+  today: string,
+  ask: ((prompt: string) => Promise<string>) | null,
+): Promise<{ decision: Decision | null; by: "ai" | "rules" }> {
+  if (ask) {
+    try {
+      const raw = await ask(decisionPrompt(text, today));
+      const json = JSON.parse(raw.replace(/^```(json)?|```$/g, "").trim());
+      if (json?.kind === "unknown") return { decision: guessDecision(text, today), by: "rules" };
+      const d = parseDecision(json);
+      if (d) return { decision: d, by: "ai" };
+    } catch {
+      /* fall through to the rules */
+    }
+  }
+  return { decision: guessDecision(text, today), by: "rules" };
 }
 
 // ---------- private links ----------
