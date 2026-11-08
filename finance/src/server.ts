@@ -39,6 +39,7 @@ async function makeBackend(): Promise<Backend> {
     store,
     source,
     sourceError,
+    planVersion: env.planVersion,
     gateway: new HttpProposalGateway(env.agentsUrl, env.huddlrSecret, { db }),
     dataFile: join(env.dataDir, "ledger.json"),
   });

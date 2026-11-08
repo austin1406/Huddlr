@@ -18,7 +18,8 @@ The engine runs Maya's persona as a simulated customer. Nothing is faked per req
 - **Indicators:** runway, credit utilization, savings rate, bill reliability, retirement on track, each with the raw numbers and thresholds from `contracts/thresholds.json`.
 - **Clock:** every calendar decision uses `now()` = real time + the `sim_state` offset. Days that pass are settled when anything next reads: paychecks land, bills are paid (rent, car loan and the card minimum also pay down those balances), daily spending posts. A bill paid while checking is overdrawn counts as late and resets the on-time streak.
 - **Events:** detected from the ledger by source id, never by date, so nothing repeats: `paycheck_landed`, `big_purchase` (over $75), `bill_due_soon` (3 days), `forecast_problem` (negative balance within 14 days), `user_transfer_seen`, `p2p_imbalance`. **Transfer watcher:** when a `user_transfer_seen` is detected, it looks for an open proposal (pending or accepted, read from the shared `proposals` table) with the same accounts and an amount no larger than the transfer, then calls the agents service's `complete` endpoint with the transfer id. The event's `matchedProposalId` and `txnId` record the result. If the agents service does not answer, the transfer is retried every 15 seconds until it does. Finance never writes the proposals table.
-- **What-if:** all four scenarios run against a copy of the ledger. Lost income also drops the savings rate to -100%.
+- **What-if:** all four scenarios run against a copy of the ledger.
+- **Plan optimizer (`get_plan`):** v1 by default. In order, each step taking only what it needs: cover a shortfall plus the cushion; capture the unclaimed employer match; pay debt above 8% APR, highest first; build the emergency fund to 1 month of essentials; fund goals; build it to 3 months; then split the rest between extra retirement (up to the target) and extra payments on remaining debt. Anything no step can use is `unallocated`. `PLAN_VERSION=v0` or `POST /admin/plan-version {"version":"v0"}` switches back to the simple rules live. Goal progress comes from `persona.json` and is not updated by accepted plans. Lost income also drops the savings rate to -100%.
 - **Proposals:** `get_pending_proposal` and `accept_proposal` forward to the agents service (`AGENTS_URL`, default `http://localhost:5000`). If it does not answer, nothing is pending and accept changes nothing.
 - **State:** ledger and event log are saved to `finance/.data/` (git-ignored) and survive restarts. The `sim_state` row is stored in Postgres when `DATABASE_URL` is set (the agents service reads it from there); otherwise in `finance/.data/sim_state.json`, which only this service can see.
 - **Fixture parity:** with a fresh ledger on 2026-11-07 the engine reproduces `contracts/fixtures/facts.fixture.json` exactly, and the shortfall fixture with `checking 33, last paid 12 days ago`. A test fails if either drifts.
@@ -48,7 +49,7 @@ npm run reset                                                  # everything back
 npm run state                                                  # balances, clock, recent transactions
 ```
 
-HTTP routes behind them: `GET /admin/state`, `POST /admin/purchase | transfer | paycheck | bill | scenario | reset | events`, `POST /admin/sim/jump-days | demo-mode`.
+HTTP routes behind them: `GET /admin/state`, `POST /admin/purchase | transfer | paycheck | bill | scenario | reset | events | plan-version`, `POST /admin/sim/jump-days | demo-mode`.
 
 Typical "rent week" demo: `npm run jump-days -- 21` (3 days before rent, `bill_due_soon` fires), then `npm run post-purchase -- 900 "Best Buy"` (`forecast_problem` fires and `shortfall` appears in `/facts`).
 

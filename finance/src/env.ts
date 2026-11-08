@@ -20,6 +20,8 @@ export const env = {
   nessieBaseUrl: process.env.NESSIE_BASE_URL || "https://api.nessieisreal.com",
   /** "First Last" of the Nessie customer to follow. Defaults to the persona's name. */
   nessieCustomer: process.env.NESSIE_CUSTOMER || "",
+  /** v1: the full priority order (default). v0: the simple rules. Also switchable live with POST /admin/plan-version. */
+  planVersion: (process.env.PLAN_VERSION === "v0" ? "v0" : "v1") as "v0" | "v1",
   /** Shared Postgres. Holds the sim_state row the other services read. Without it the clock is kept in a local file. */
   databaseUrl: process.env.DATABASE_URL || "",
   /** Where get_pending_proposal and accept_proposal are forwarded (the agents service, Caddy path /agents). */

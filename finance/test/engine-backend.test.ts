@@ -52,7 +52,7 @@ test("tools: can_i_afford, what_if, get_plan answer from the engine", async () =
   const w = WhatIfResult.parse(await (await post(ENDPOINTS.tools.what_if.path, { scenario: { type: "lose_income", months: 2 } })).json());
   assert.ok(w.after.firstNegativeDate);
   const p = Plan.parse(await (await post(ENDPOINTS.tools.get_plan.path, { amount: 600 })).json());
-  assert.equal(p.lines[0]?.destination, "card");
+  assert.deepEqual(p.lines.map((l) => l.destination), ["ira", "card"]); // v1: the employer match first, then the 24% card
 });
 
 test("a purchase turns into a big_purchase event once, and shows in recentEvents", async () => {

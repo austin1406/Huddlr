@@ -11,6 +11,7 @@ import type {
   WhatIfResult,
 } from "../../contracts/src";
 import type { ScenarioName } from "./env";
+import type { PlanVersion } from "./engine/optimizer";
 import type { Txn } from "./engine/ledger";
 
 export interface AdminState {
@@ -24,6 +25,7 @@ export interface AdminState {
   txnCount: number;
   eventCount: number;
   recentTxns: Txn[];
+  planVersion: PlanVersion;
   source: { name: string; baselined: boolean; recordsSeen: number; error?: string };
 }
 
@@ -48,6 +50,8 @@ export interface EngineOps {
   state(): Promise<AdminState>;
   jumpDays(days: number): Promise<SimState>;
   setDemoMode(on: boolean): Promise<SimState>;
+  /** v1 is the full priority order; v0 is the simple rules. Switchable live if v1 misbehaves. */
+  setPlanVersion(version: PlanVersion): PlanVersion;
   purchase(op: PurchaseOp): Promise<Txn>;
   transfer(from: AccountId, to: AccountId, amount: number): Promise<Txn>;
   paycheck(amount?: number): Promise<Txn>;
